@@ -22,17 +22,19 @@
                         $t('[CQ:faceid=1]你好啊👋，这个选项将会强制覆盖自动检测')
                     }}</span>
                 </div>
-                <select v-model="runtimeData.sysConfig.msg_type"
-                    name="msg_type"
-                    title="msg_type"
-                    @change="save">
-                    <option v-for="item in Object.values(BotMsgType)
-                                .filter(value => typeof value === 'number')"
-                        :key="item"
-                        :value="item">
-                        {{ getBotTypeName(item) }}
-                    </option>
-                </select>
+                <div class="select-wrapper">
+                    <select v-model="runtimeData.sysConfig.msg_type"
+                        name="msg_type"
+                        title="msg_type"
+                        @change="save">
+                        <option v-for="item in Object.values(BotMsgType)
+                                    .filter(value => typeof value === 'number')"
+                            :key="item"
+                            :value="item">
+                            {{ getBotTypeName(item) }}
+                        </option>
+                    </select>
+                </div>
             </div>
             <div class="opt-item">
                 <font-awesome-icon :icon="['fas', 'gear']" />
@@ -42,14 +44,16 @@
                         $t('不同框架之间的化学反应我们将其称之为达利园效应')
                     }}</span>
                 </div>
-                <select v-model="jsonMapName" @change="changeJsonMap">
-                    <option v-if="jsonMapName == ''" value="">
-                        {{ $t('未连接') }}
-                    </option>
-                    <option v-for="item in getPathMapList()" :key="item" :value="item">
-                        {{ item.replace('Chat', '') }}
-                    </option>
-                </select>
+                <div class="select-wrapper">
+                    <select v-model="jsonMapName" @change="changeJsonMap">
+                        <option v-if="jsonMapName == ''" value="">
+                            {{ $t('未连接') }}
+                        </option>
+                        <option v-for="item in getPathMapList()" :key="item" :value="item">
+                            {{ item.replace('Chat', '') }}
+                        </option>
+                    </select>
+                </div>
             </div>
         </div>
 
@@ -62,21 +66,23 @@
                     <span>{{ $t('日志等级') }}</span>
                     <span>{{ $t('ReferenceError: moYu is not defined') }}</span>
                 </div>
-                <select v-model="runtimeData.sysConfig.log_level"
-                    name="log_level" title="log_level" @change="save">
-                    <option value="err">
-                        {{ $t('错误') }}
-                    </option>
-                    <option value="debug">
-                        {{ $t('调试') }}
-                    </option>
-                    <option value="info">
-                        {{ $t('基本') }}
-                    </option>
-                    <option value="all">
-                        {{ $t('全部') }}
-                    </option>
-                </select>
+                <div class="select-wrapper">
+                    <select v-model="runtimeData.sysConfig.log_level"
+                        name="log_level" title="log_level" @change="save">
+                        <option value="err">
+                            {{ $t('错误') }}
+                        </option>
+                        <option value="debug">
+                            {{ $t('调试') }}
+                        </option>
+                        <option value="info">
+                            {{ $t('基本') }}
+                        </option>
+                        <option value="all">
+                            {{ $t('全部') }}
+                        </option>
+                    </select>
+                </div>
             </div>
             <div class="opt-item">
                 <div :class="checkDefault('debug_msg')" />
@@ -125,6 +131,17 @@
                 <input v-model="appmsg_text" class="ss-input"
                     style="width: 150px" type="text" @keyup="sendTestAppmsg">
             </div>
+            <div v-if="dev" class="opt-item">
+                <font-awesome-icon :icon="['fas', 'trash']" />
+                <div>
+                    <span>{{ $t('移除未使用的配置') }}</span>
+                    <span>{{ $t('sudo rm -rf /etc') }}</span>
+                </div>
+                <button style="width: 100px; font-size: 0.8rem"
+                    class="ss-button" @click="rmNeedlessOption">
+                    {{ $t('执行') }}
+                </button>
+            </div>
             <div class="opt-item">
                 <font-awesome-icon :icon="['fas', 'file-invoice']" />
                 <div>
@@ -147,7 +164,7 @@
                     {{ $t('执行') }}
                 </button>
             </div>
-            <template v-if="['electron', 'tauri'].includes(runtimeData.tags.clientType)">
+            <template v-if="backend.isDesktop()">
                 <div class="opt-item">
                     <font-awesome-icon :icon="['fas', 'power-off']" />
                     <div>
@@ -164,7 +181,7 @@
         <div class="ss-card">
             <header>{{ $t('维护与备份') }}</header>
             <div class="opt-item">
-                <font-awesome-icon :icon="['fas', 'download']" />
+                <font-awesome-icon :icon="['fas', 'upload']" />
                 <div>
                     <span>{{ $t('导出设置项') }}</span>
                     <span>{{
@@ -177,7 +194,7 @@
                 </button>
             </div>
             <div class="opt-item">
-                <font-awesome-icon :icon="['fas', 'upload']" />
+                <font-awesome-icon :icon="['fas', 'download']" />
                 <div>
                     <span>{{ $t('导入设置项') }}</span>
                     <span>{{ $t('tar zxvf cache.tar.gz /localStorage') }}</span>
@@ -203,7 +220,6 @@
 </template>
 
 <script lang="ts">
-    import VConsole from 'vconsole'
     import app from '@renderer/main'
     import packageInfo from '../../../../../package.json'
 
@@ -213,6 +229,7 @@
         runASWEvent as save,
         saveAll,
         checkDefault,
+        optDefault,
     } from '@renderer/function/option'
     import { Connector } from '@renderer/function/connect'
     import { PopInfo, PopType } from '@renderer/function/base'
@@ -221,12 +238,13 @@
     import { BotMsgType } from '@renderer/function/elements/information'
     import { uptime } from '@renderer/main'
     import { loadJsonMap } from '@renderer/function/utils/appUtil'
-import { callBackend } from '@renderer/function/utils/systemUtil'
+    import { backend } from '@renderer/runtime/backend'
 
     export default defineComponent({
         name: 'ViewOptDev',
         data() {
             return {
+                backend: backend,
                 jsonMapName: runtimeData.jsonMap?.name ?? '',
 
                 checkDefault: checkDefault,
@@ -237,6 +255,7 @@ import { callBackend } from '@renderer/function/utils/systemUtil'
                 ws_text: '',
                 parse_text: '',
                 appmsg_text: '',
+                dev: import.meta.env.DEV
             }
         },
         mounted() {
@@ -277,17 +296,12 @@ import { callBackend } from '@renderer/function/utils/systemUtil'
                 )
             },
             printRuntime() {
-                if(runtimeData.tags.clientType === 'capacitor') {
-                    if(!runtimeData.plantform.vConsole) {
-                        runtimeData.plantform.vConsole = new VConsole({
-                            theme: runtimeData.tags.darkMode ? 'dark' : 'light',
-                        })
-                    }
+                if(backend.isMobile()) {
                     const switcher = document.getElementById('__vconsole')?.getElementsByClassName('vc-switch')[0]
                     if (switcher) {
                         (switcher as HTMLDivElement).click()
                     // safeArea
-                    callBackend('SafeArea', 'getSafeArea', true).then((safeArea) => {
+                    backend.call('SafeArea', 'getSafeArea', true).then((safeArea) => {
                         if (safeArea) {
                             const vcPanel = document.getElementById('__vconsole')?.getElementsByClassName('vc-panel')[0]
                             if (vcPanel) {
@@ -308,8 +322,8 @@ import { callBackend } from '@renderer/function/utils/systemUtil'
                 console.log(runtimeData)
                 console.log('=========================')
                 /* eslint-enable no-console */
-                if(runtimeData.tags.clientType !== 'capacitor') {
-                    callBackend(undefined, 'win:openDevTools', false)
+                if(!backend.isMobile()) {
+                    backend.call(undefined, 'win:openDevTools', false)
                 }
             },
             async printVersionInfo() {
@@ -319,9 +333,9 @@ import { callBackend } from '@renderer/function/utils/systemUtil'
                 )
 
                 // 索要框架信息
-                const addInfo = await callBackend('Onebot', 'opt:getSystemInfo', true)
-                if(runtimeData.tags.clientType === 'capacitor') {
-                    addInfo.vconsole = ['vConsole Version', runtimeData.plantform.vConsole?.version ?? 'Not loaded']
+                const addInfo = await backend.call('Onebot', 'opt:getSystemInfo', true)
+                if(backend.isMobile() && backend.function && 'vConsole' in backend.function && backend.function.vConsole) {
+                    addInfo.vconsole = ['vConsole Version', backend.function.vConsole.version ?? 'Not loaded']
                 }
 
                 const browser = detect() as BrowserInfo
@@ -341,23 +355,21 @@ import { callBackend } from '@renderer/function/utils/systemUtil'
                     })
                 }
                 // 获取安装信息，这儿主要判断几种已提交的包管理安装方式
-                if (['electron', 'tauri'].includes(runtimeData.tags.clientType) &&
-                    runtimeData.tags.release) {
+                if (backend.isDesktop() && backend.release) {
                     const process = window.electron?.process
                     switch (process && process.platform) {
                         case 'linux': {
                             // archlinux
-                            if (runtimeData.tags.release.toLowerCase().indexOf('arch') > 0) {
+                            if (backend.release.toLowerCase().indexOf('arch') > 0) {
                                 let pacmanInfo =
-                                    await callBackend(undefined, 'sys:runCommand', true,
+                                    await backend.call(undefined, 'sys:runCommand', true,
                                         'pacman -Q stapxs-qq-lite-bin',
                                     )
                                 if (pacmanInfo.success) {
                                     info += '    Install Type      -> aur\n'
-                                } else {
+                                } else if(backend.function && 'invoke' in backend.function) {
                                     // 也有可能是 stapxs-qq-lite，这是我自己打的原生包
-                                    pacmanInfo = await runtimeData.
-                                        plantform.reader.invoke(
+                                    pacmanInfo = await backend.function.invoke(
                                             'sys:runCommand',
                                             'pacman -Q stapxs-qq-lite',
                                         )
@@ -385,8 +397,8 @@ import { callBackend } from '@renderer/function/utils/systemUtil'
                 info += `    Doc Width         -> ${document.getElementById('app')?.offsetWidth} px\n`
 
                 // capactior：索要 safeArea
-                if (runtimeData.tags.clientType === 'capacitor') {
-                    const safeArea = await callBackend('SafeArea', 'getSafeArea', true)
+                if (backend.isMobile()) {
+                    const safeArea = await backend.call('SafeArea', 'getSafeArea', true)
                     if (safeArea) {
                         // 按照前端习惯，这儿的 safeArea 顺序是 top, right, bottom, left
                         const safeAreaStr = safeArea.top + ', ' + safeArea.right + ', ' + safeArea.bottom + ', ' + safeArea.left
@@ -441,7 +453,7 @@ import { callBackend } from '@renderer/function/utils/systemUtil'
             printSetUpInfo() {
                 const json = JSON.stringify(runtimeData.sysConfig)
                 const popInfo = {
-                    svg: 'download',
+                    svg: 'upload',
                     html:
                         '<textarea style="width: calc(100% - 40px);min-height: 90px;background: var(--color-card-1);color: var(--color-font);border: 0;padding: 20px;border-radius: 7px;margin-top: -10px;">' +
                         json +
@@ -471,7 +483,7 @@ import { callBackend } from '@renderer/function/utils/systemUtil'
             },
             importSetUpInfo() {
                 const popInfo = {
-                    svg: 'upload',
+                    svg: 'download',
                     html: '<textarea id="importSetUpInfoTextArea" style="width: calc(100% - 40px);min-height: 90px;background: var(--color-card-1);color: var(--color-font);border: 0;padding: 20px;border-radius: 7px;margin-top: -10px;"></textarea>',
                     title: this.$t('导入设置项'),
                     button: [
@@ -528,7 +540,7 @@ import { callBackend } from '@renderer/function/utils/systemUtil'
                                     document.cookie = c.replace(/^ +/, '')
                                         .replace(/=.*/,'=;expires=' + new Date().toUTCString() + ';path=/')
                                 })
-                                callBackend(undefined, 'opt:clearAll', false)
+                                backend.call(undefined, 'opt:clearAll', false)
                                 location.reload()
                             },
                         },
@@ -544,7 +556,7 @@ import { callBackend } from '@renderer/function/utils/systemUtil'
                 runtimeData.popBoxList.push(popInfo)
             },
             restartapp() {
-                callBackend(undefined, 'win:relaunch', false)
+                backend.call(undefined, 'win:relaunch', false)
             },
             getBotTypeName(index: BotMsgType) {
                 switch (index) {
@@ -566,6 +578,49 @@ import { callBackend } from '@renderer/function/utils/systemUtil'
             changeJsonMap() {
                 const getPath = loadJsonMap(this.jsonMapName)
                 if (getPath) runtimeData.jsonMap = getPath
+            },
+            // 查看配置文件
+            rmNeedlessOption() {
+                const needless: string[] = []
+                for (const key of Object.keys(runtimeData.sysConfig)) {
+                    if (optDefault[key] === undefined) {
+                        needless.push(key)
+                    }
+                }
+                if (needless.length === 0) {
+                    new PopInfo().add(
+                        PopType.INFO,
+                        this.$t('没有需要删除的配置项'),
+                    )
+                    return
+                }
+                const popInfo = {
+                    title: this.$t('转发消息'),
+                    html: `
+                        <header>以下配置将被删除</header>
+                        <div style="color: var(--color-red);font-weight: 700;">
+                    ` + needless.join('<br>') + '</div>',
+                    button: [
+                        {
+                            text: this.$t('取消'),
+                            master: true,
+                            fun: () => {
+                                runtimeData.popBoxList.shift()
+                            },
+                        },
+                        {
+                            text: this.$t('确定'),
+                            fun: () => {
+                                for (const key of needless) {
+                                    delete runtimeData.sysConfig[key]
+                                }
+                                saveAll(runtimeData.sysConfig)
+                                runtimeData.popBoxList.shift()
+                            },
+                        },
+                    ],
+                }
+                runtimeData.popBoxList.push(popInfo)
             },
         },
     })

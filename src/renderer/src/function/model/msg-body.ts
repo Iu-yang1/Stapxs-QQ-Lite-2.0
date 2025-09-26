@@ -9,13 +9,10 @@
 import xss from 'xss'
 import app from '@renderer/main'
 
-import { PopInfo, PopType } from '@renderer/function/base'
-import { runtimeData } from '@renderer/function/msg'
-import { Connector } from '@renderer/function/connect'
 import { openLink } from '@renderer/function/utils/appUtil'
 import { getDeviceType } from '@renderer/function/utils/systemUtil'
-
-const popInfo = new PopInfo()
+import { linkView } from '../utils/linkViewUtil'
+import { backend } from '@renderer/runtime/backend'
 
 export class MsgBodyFuns {
     /**
@@ -180,7 +177,8 @@ export class MsgBodyFuns {
      * @param msg 消息
      * @returns { type: string, app: any }
      */
-    static getJSONType(msg: any) {
+    static getJSONType(card: any) {
+        const msg = card.item
         if (msg.type != 'xml') {
             const data = msg.data
             const json = JSON.parse(data)
@@ -195,6 +193,14 @@ export class MsgBodyFuns {
                 info.preview = undefined
                 info.icon = ''
                 info.name = json.desc
+            }
+            if (json.app == 'com.tencent.mannounce') {
+                // base64 编码的群公告
+                info.title = this.decodeBase64Unicode(json.meta.mannounce.title)
+                info.desc = this.decodeBase64Unicode(json.meta.mannounce.text).replaceAll('\n', '<br>')
+                info.icon = ''
+                info.preview = undefined
+                info.name = this.decodeBase64Unicode(json.meta.mannounce.title)
             }
             if (json.app == 'com.tencent.multimsg') {
                 info.title = json.meta.detail.source
@@ -231,6 +237,17 @@ export class MsgBodyFuns {
                 info.desc = json.meta['Location.Search'].address
                 type = 'tencent.map'
             }
+            if (json.app == 'com.tencent.miniapp_01' && info.name == '哔哩哔哩') {
+                backend.call('Onebot', 'sys:getFinalRedirectUrl', true, info.url)
+                .then((fistLink) => {
+                    linkView.bilibili(fistLink).then((result) => {
+                        card.$emit('page-view', fistLink, result)
+                    })
+                })
+                if (!backend.isWeb()) {
+                    return null
+                }
+            }
 
             return { type, app: info, append }
         }
@@ -243,48 +260,23 @@ export class MsgBodyFuns {
      */
     static cardClick(bodyId: string) {
         const sender = document.getElementById(bodyId)
-        if (sender !== null) {
-            const type = sender.dataset.type
-            // 如果存在 url 项，优先打开 url
-            if (
-                sender.dataset.url !== undefined &&
-                sender.dataset.url !== 'undefined' &&
-                sender.dataset.url !== ''
-            ) {
-                const openType =
-                    sender.dataset.urlOpenType || sender.dataset.urlopentype
-                if (openType == '_self') {
-                    window.open(sender.dataset.url, '_self')
-                } else {
-                    // 默认都以 _blank 打开
-                    openLink(sender.dataset.url)
-                }
-                return
-            }
-            // 接下来按类型处理
-            switch (type) {
-                case 'forward': {
-                    // 解析合并转发消息
-                    this.getForwardMsg(sender.dataset.id)
-                    break
-                }
-            }
-        }
-    }
 
-    static getForwardMsg(id: any) {
-        if (id !== 'undefined') {
-            runtimeData.mergeMessageList = []
-            Connector.send(
-                runtimeData.jsonMap.forward_msg.name,
-                { id: id },
-                'getForwardMsg',
-            )
-        } else {
-            popInfo.add(
-                PopType.INFO,
-                app.config.globalProperties.$t('合并消息层级过多，解析失败。'),
-            )
+        if (!sender) return
+
+        // 如果存在 url 项，优先打开 url
+        if (
+            sender.dataset.url !== undefined &&
+            sender.dataset.url !== 'undefined' &&
+            sender.dataset.url !== ''
+        ) {
+            const openType =
+                sender.dataset.urlOpenType || sender.dataset.urlopentype
+            if (openType == '_self') {
+                window.open(sender.dataset.url, '_self')
+            } else {
+                // 默认都以 _blank 打开
+                openLink(sender.dataset.url)
+            }
         }
     }
 
@@ -302,5 +294,11 @@ export class MsgBodyFuns {
         text = xss(text, { whiteList: { a: ['href', 'target'] } })
         // 返回
         return text
+    }
+
+    static decodeBase64Unicode(base64) {
+        const binary = atob(base64);
+        const bytes = Uint8Array.from(binary, ch => ch.charCodeAt(0));
+        return new TextDecoder().decode(bytes);
     }
 }

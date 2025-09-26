@@ -25,6 +25,13 @@
 
 ![view](README/view.png)
 
+## ☕️ 赞助项目
+<p align="center">
+    <a href="https://www.ifdian.net/a/stapxs" target="_blank">
+    <img src="README/sponsor.png" width="600">
+    </a>
+</p>
+
 ## ✨ 特性支持
 
 - ✅ 使用 Vue.js 全家桶开发，快乐前后端分离
@@ -67,6 +74,10 @@ Stapxs QQ Lite 在版本发布时构建了一份根目录下的 Web 文件，你
 ``` bash
 npx ssqq-web hostname=127.0.0.1 port=8081
 ```
+
+### > 使用 Docker 部署网页
+
+Stapxs QQ Lite 可以使用 Docker 部署，在社区中有人编写了一份使用 Docker 部署的文档，你可以在 [这儿](https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/issues/245) 查看。
 
 ## 💬 提醒和问题
 这儿有一些关于使用 QQ Bot 和第三方客户端的常见疑问，你也可以查看 [常见问题](https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/issues/117) issue 来获取更多使用部署相关的问题。

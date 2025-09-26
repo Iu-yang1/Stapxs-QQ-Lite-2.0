@@ -11,12 +11,12 @@
 
 <template>
     <div id="chat-pan"
+        v-move="chatMoveOptions"
         :class="'chat-pan' +
             (runtimeData.tags.openSideBar ? ' open' : '') +
-            (['linux', 'win32'].includes(runtimeData.tags.platform ?? '') ? ' withBar' : '')"
+            (['linux', 'win32'].includes(backend.platform ?? '') ? ' withBar' : '')"
         :style="`background-image: url(${runtimeData.sysConfig.chat_background});`"
-        @touchmove="ChatOnMove"
-        @touchend="chatMoveEnd">
+        @v-move-right.prevent="exitWin()">
         <!-- 聊天基本信息 -->
         <div class="info">
             <font-awesome-icon :icon="['fas', 'bars-staggered']" @click="openLeftBar" />
@@ -70,6 +70,10 @@
                 <hr>
                 <a>{{ $t('没有更多消息了') }}</a>
             </div>
+            <div v-if="runtimeData.tags.loadHistoryFail" class="note note-nomsg">
+                <hr>
+                <a>{{ $t('获取历史记录失败') }}</a>
+            </div>
             <!-- 时间戳，在下滑加载的时候会显示，方便在大段的相连消息上让用户知道消息时间 -->
             <NoticeBody v-if="tags.nowGetHistroy && list.length > 0"
                 :data="{ sub_type: 'time', time: list[0].time }" />
@@ -90,15 +94,15 @@
                                  msgIndex.post_type === 'message_sent') &&
                                  msgIndex.message.length > 0"
                         :key="msgIndex.fake_message_id ?? msgIndex.message_id"
-                        :selected="multipleSelectList.includes(msgIndex.message_id) || tags.openedMenuMsg?.id == 'chat-' + msgIndex.message_id"
+                        :selected="multipleSelectList.includes(msgIndex.message_id) || tags.menuDisplay.menuSelectedMsgId == msgIndex.message_id"
                         :data="msgIndex"
+                        :user-info-pan="userInfoPanFunc"
+                        :image-list-header="chatImg"
                         @click="msgClick($event, msgIndex)"
+                        @show-menu="showMsgMeun"
                         @scroll-to-msg="scrollToMsg"
                         @image-loaded="imgLoadedScroll"
-                        @contextmenu.prevent="showMsgMeun($event, msgIndex)"
-                        @touchstart="msgStartMove($event, msgIndex)"
-                        @touchmove="msgOnMove"
-                        @touchend="msgMoveEnd($event, msgIndex)"
+                        @left-move="replyMsg"
                         @send-poke="sendPoke" />
                     <!-- 其他通知消息 -->
                     <NoticeBody v-else-if="msgIndex.post_type === 'notice'"
@@ -125,14 +129,13 @@
                                  msgIndex.post_type === 'message_sent') &&
                                  msgIndex.message.length > 0"
                         :key="msgIndex.fake_message_id ?? msgIndex.message_id"
-                        :selected="multipleSelectList.includes(msgIndex.message_id) || tags.openedMenuMsg?.id == 'chat-' + msgIndex.message_id"
+                        :selected="multipleSelectList.includes(msgIndex.message_id) || tags.menuDisplay.menuSelectedMsgId == msgIndex.message_id"
                         :data="msgIndex"
+                        :user-info-pan="userInfoPanFunc"
                         @scroll-to-msg="scrollToMsg"
+                        @show-menu="showMsgMeun"
                         @image-loaded="imgLoadedScroll"
-                        @contextmenu.prevent="showMsgMeun($event, msgIndex)"
-                        @touchstart="msgStartMove($event, msgIndex)"
-                        @touchmove="msgOnMove"
-                        @touchend="msgMoveEnd($event, msgIndex)" />
+                        @left-move="replyMsg" />
                 </template>
             </TransitionGroup>
         </div>
@@ -200,10 +203,13 @@
                                         <template
                                             v-for="(context, indexc) in item.msg_content"
                                             :key="'jinc-' + index + '-' + indexc">
-                                            <span v-if="context.msg_type === 1">{{ context.text }}</span>
-                                            <img v-if="context.msg_type === 2"
-                                                class="face" :src="getFace(context.face_index)">
-                                            <img v-if="context.msg_type === 3" :src="context.image_url">
+                                            <span v-if="context.type === 'text'">
+                                                {{ context.data.text }}
+                                            </span>
+                                            <EmojiFace v-if="context.type === 'face'"
+                                                :emoji="Emoji.get(Number(context.data.id))" />
+                                            <img v-if="context.type === 'image'"
+                                                :src="context.data.url">
                                         </template>
                                     </div>
                                 </div>
@@ -313,14 +319,16 @@
             </div>
             <!-- 消息发送框 -->
             <div>
-                <div @click="moreFunClick(runtimeData.sysConfig.quick_send)" @contextmenu="moreFunClick()">
-                    <font-awesome-icon v-if="runtimeData.sysConfig.quick_send == 'default'" :icon="['fas', 'plus']" />
-                    <font-awesome-icon v-if="runtimeData.sysConfig.quick_send == 'img'" :icon="['fas', 'image']" />
-                    <font-awesome-icon v-if="runtimeData.sysConfig.quick_send == 'file'" :icon="['fas', 'folder']" />
-                    <font-awesome-icon v-if="runtimeData.sysConfig.quick_send == 'face'" :icon="['fas', 'face-laugh']" />
+                <div v-menu.prevent="_=>moreFunClick()"
+                    @click="moreFunClick(runtimeData.sysConfig.quick_send)">
+                    <font-awesome-icon v-if="tags.showMoreDetail || details.find(item => item.open)" :icon="['fas', 'minus']" />
+                    <font-awesome-icon v-else-if="runtimeData.sysConfig.quick_send == 'default'" :icon="['fas', 'plus']" />
+                    <font-awesome-icon v-else-if="runtimeData.sysConfig.quick_send == 'img'" :icon="['fas', 'image']" />
+                    <font-awesome-icon v-else-if="runtimeData.sysConfig.quick_send == 'file'" :icon="['fas', 'folder']" />
+                    <font-awesome-icon v-else-if="runtimeData.sysConfig.quick_send == 'face'" :icon="['fas', 'face-laugh']" />
                 </div>
                 <div>
-                    <form @submit.prevent="mainSubmit">
+                    <form @submit="mainSubmit">
                         <input v-if="!Option.get('use_breakline')"
                             id="main-input"
                             v-model="msg"
@@ -361,112 +369,88 @@
         <!-- 合并转发消息预览器 -->
         <MergePan ref="mergePan" />
         <!-- At 信息悬浮窗 -->
-        <div class="mumber-info">
-            <div v-if="Object.keys(mumberInfo).length > 0 && mumberInfo.error === undefined"
-                class="ss-card"
-                :style="getPopPost()">
-                <img :src="'https://q1.qlogo.cn/g?b=qq&s=0&nk=' + mumberInfo.user_id">
-                <div>
-                    <span name="id">{{ mumberInfo.user_id }}</span>
-                    <div>
-                        <a>{{ mumberInfo.card == '' ? mumberInfo.nickname : mumberInfo.card }}</a>
-                        <div>
-                            <span v-if="mumberInfo.role !== 'member'">
-                                {{ $t('成员类型_' + mumberInfo.role) }}
-                            </span>
-                            <span>Lv {{ mumberInfo.level }}</span>
-                        </div>
-                    </div>
-                    <span v-if="mumberInfo.join_time">
-                        {{
-                            $t('{time} 加入群聊', {
-                                time: Intl.DateTimeFormat(trueLang, {
-                                    year: 'numeric',
-                                    month: 'short',
-                                    day: 'numeric',
-                                }).format(
-                                    new Date(mumberInfo.join_time * 1000),
-                                ),
-                            })
-                        }}
-                    </span>
-                </div>
-            </div>
-        </div>
+        <UserInfoPanComponent :data="userInfoPanData" />
         <!-- 消息右击菜单 -->
-        <div :class="'msg-menu' + (['linux', 'win32'].includes(runtimeData.tags.platform ?? '') ? ' withBar' : '')">
-            <div v-show="tags.showMsgMenu" class="msg-menu-bg" @click="closeMsgMenu" />
-            <div id="msgMenu" :class="tags.showMsgMenu ?
-                'ss-card msg-menu-body show' : 'ss-card msg-menu-body'">
-                <div v-if="runtimeData.chatInfo.show.type == 'group'"
-                    v-show="tags.menuDisplay.showRespond"
-                    :class="'ss-card respond' + (tags.menuDisplay.respond ? ' open' : '')">
-                    <template v-for="(num, index) in respondIds" :key="'respond-' + num">
-                        <img v-if="getFace(num) != ''" loading="lazy"
-                            :src="getFace(num) as any" @click="sendRespond(num)">
-                        <font-awesome-icon v-if="index == 4" :icon="['fas', 'angle-up']" @click="tags.menuDisplay.respond = true" />
-                    </template>
-                </div>
-                <div v-show="tags.menuDisplay.add" @click="forwardSelf()">
-                    <div><font-awesome-icon :icon="['fas', 'plus']" /></div>
-                    <a>{{ $t('+ 1') }}</a>
-                </div>
-                <div v-show="tags.menuDisplay.relpy" @click="replyMsg(true)">
-                    <div><font-awesome-icon :icon="['fas', 'message']" /></div>
-                    <a>{{ $t('回复') }}</a>
-                </div>
-                <div v-show="tags.menuDisplay.forward" @click="showForWard()">
-                    <div><font-awesome-icon :icon="['fas', 'share']" /></div>
-                    <a>{{ $t('转发') }}</a>
-                </div>
-                <div v-show="tags.menuDisplay.select" @click="intoMultipleSelect()">
-                    <div><font-awesome-icon :icon="['fas', 'circle-check']" /></div>
-                    <a>{{ $t('多选') }}</a>
-                </div>
-                <div v-show="tags.menuDisplay.copy" @click="copyMsg">
-                    <div><font-awesome-icon :icon="['fas', 'clipboard']" /></div>
-                    <a>{{ $t('复制') }}</a>
-                </div>
-                <div v-show="tags.menuDisplay.copySelect" @click="copySelectMsg">
-                    <div><font-awesome-icon :icon="['fas', 'code']" /></div>
-                    <a>{{ $t('复制选中文本') }}</a>
-                </div>
-                <div v-show="tags.menuDisplay.downloadImg != false" @click="downloadImg">
-                    <div><font-awesome-icon :icon="['fas', 'floppy-disk']" /></div>
-                    <a>{{ $t('下载图片') }}</a>
-                </div>
-                <div v-show="tags.menuDisplay.revoke" @click="revokeMsg">
-                    <div><font-awesome-icon :icon="['fas', 'xmark']" /></div>
-                    <a>{{ $t('撤回') }}</a>
-                </div>
-                <div v-show="tags.menuDisplay.at"
-                    @click="selectedMsg ? addSpecialMsg({ msgObj: { type: 'at', qq: selectedMsg.sender.user_id }, addText: true, }): '';
-                            toMainInput();
-                            closeMsgMenu()">
-                    <div><font-awesome-icon :icon="['fas', 'at']" /></div>
-                    <a>{{ $t('提及') }}</a>
-                </div>
-                <div v-show="tags.menuDisplay.poke" @click="sendPoke(selectedMsg ? selectedMsg.sender.user_id : undefined)">
-                    <div><font-awesome-icon :icon="['fas', 'fa-hand-point-up']" /></div>
-                    <a>{{ $t('戳一戳') }}</a>
-                </div>
-                <div v-show="tags.menuDisplay.remove" @click="removeUser">
-                    <div><font-awesome-icon :icon="['fas', 'trash-can']" /></div>
-                    <a>{{ $t('移出群聊') }}</a>
-                </div>
-                <div v-show="tags.menuDisplay.config"
-                    @click="openChatInfoPan();
-                            ($refs.infoRef as any).openMoreConfig(selectedMsg?.sender.user_id);
-                            closeMsgMenu();">
-                    <div><font-awesome-icon :icon="['fas', 'cog']" /></div>
-                    <a>{{ $t('成员设置') }}</a>
-                </div>
-                <div v-show="tags.menuDisplay.jumpToMsg" @click="jumpSearchMsg">
-                    <div><font-awesome-icon :icon="['fas', 'arrow-up-right-from-square']" /></div>
-                    <a>{{ $t('跳转到消息') }}</a>
+        <Teleport to="body">
+            <div :class="'msg-menu' + (['linux', 'win32'].includes(backend.platform ?? '') ? ' withBar' : '')">
+                <div v-show="tags.showMsgMenu" class="msg-menu-bg" @click="closeMsgMenu" />
+                <div id="msgMenu" :class="tags.showMsgMenu ?
+                    'ss-card msg-menu-body show' : 'ss-card msg-menu-body'">
+                    <div v-if="runtimeData.chatInfo.show.type == 'group'"
+                        v-show="tags.menuDisplay.showRespond"
+                        :class="'ss-card respond' + (tags.menuDisplay.respond ? ' open' : '')">
+                        <template v-for="(num, index) in Emoji.responseId" :key="'respond-' + num">
+                            <EmojiFace :emoji="Emoji.get(num)!"
+                                @click="sendRespond(num)" />
+                            <font-awesome-icon v-if="index == 4" :icon="['fas', 'angle-up']"
+                                @click="tags.menuDisplay.respond = true" />
+                        </template>
+                    </div>
+                    <div v-show="tags.menuDisplay.add" @click="forwardSelf()">
+                        <div><font-awesome-icon :icon="['fas', 'plus']" /></div>
+                        <a>{{ $t('+ 1') }}</a>
+                    </div>
+                    <div v-show="tags.menuDisplay.relpy" @click="menuReplyMsg(true)">
+                        <div><font-awesome-icon :icon="['fas', 'message']" /></div>
+                        <a>{{ $t('回复') }}</a>
+                    </div>
+                    <div v-show="tags.menuDisplay.forward" @click="showForWard()">
+                        <div><font-awesome-icon :icon="['fas', 'share']" /></div>
+                        <a>{{ $t('转发') }}</a>
+                    </div>
+                    <div v-show="tags.menuDisplay.select" @click="intoMultipleSelect()">
+                        <div><font-awesome-icon :icon="['fas', 'circle-check']" /></div>
+                        <a>{{ $t('多选') }}</a>
+                    </div>
+                    <div v-show="tags.menuDisplay.copy" @click="copyMsg">
+                        <div><font-awesome-icon :icon="['fas', 'clipboard']" /></div>
+                        <a>{{ $t('复制') }}</a>
+                    </div>
+                    <div v-show="tags.menuDisplay.copySelect" @click="copySelectMsg">
+                        <div><font-awesome-icon :icon="['fas', 'code']" /></div>
+                        <a>{{ $t('复制选中文本') }}</a>
+                    </div>
+                    <div v-show="tags.menuDisplay.downloadImg != false" @click="downloadImg">
+                        <div><font-awesome-icon :icon="['fas', 'floppy-disk']" /></div>
+                        <a>{{ $t('下载图片') }}</a>
+                    </div>
+                    <div v-show="tags.menuDisplay.revoke" @click="revokeMsg">
+                        <div><font-awesome-icon :icon="['fas', 'xmark']" /></div>
+                        <a>{{ $t('撤回') }}</a>
+                    </div>
+                    <div v-show="tags.menuDisplay.at"
+                        @click="selectedMsg ? addSpecialMsg({ msgObj: { type: 'at', qq: selectedMsg.sender.user_id }, addText: true, }): '';
+                                toMainInput();
+                                closeMsgMenu()">
+                        <div><font-awesome-icon :icon="['fas', 'at']" /></div>
+                        <a>{{ $t('提及') }}</a>
+                    </div>
+                    <div v-show="tags.menuDisplay.poke" @click="sendPoke(selectedMsg ? selectedMsg.sender.user_id : undefined)">
+                        <div><font-awesome-icon :icon="['fas', 'fa-hand-point-up']" /></div>
+                        <a>{{ $t('戳一戳') }}</a>
+                    </div>
+                    <div v-show="tags.menuDisplay.remove" @click="removeUser">
+                        <div><font-awesome-icon :icon="['fas', 'trash-can']" /></div>
+                        <a>{{ $t('移出群聊') }}</a>
+                    </div>
+                    <div v-show="tags.menuDisplay.config"
+                        @click="openChatInfoPan();
+                                ($refs.infoRef as any).openMoreConfig(selectedMsg?.sender.user_id);
+                                closeMsgMenu();">
+                        <div><font-awesome-icon :icon="['fas', 'cog']" /></div>
+                        <a>{{ $t('成员设置') }}</a>
+                    </div>
+                    <div v-show="tags.menuDisplay.jumpToMsg" @click="jumpSearchMsg">
+                        <div><font-awesome-icon :icon="['fas', 'arrow-up-right-from-square']" /></div>
+                        <a>{{ $t('跳转到消息') }}</a>
+                    </div>
+                    <div v-show="isDev" @click="consoleLogMsg">
+                        <div><font-awesome-icon :icon="['fas', 'screwdriver-wrench']" /></div>
+                        <a>{{ $t('调试信息') }}</a>
+                    </div>
                 </div>
             </div>
-        </div>
+        </Teleport>
         <!-- 群 / 好友信息弹窗 -->
         <Transition>
             <Info ref="infoRef" :chat="chat" :tags="tags"
@@ -535,69 +519,159 @@
                 <div class="bg" @click="cancelForward" />
             </div>
         </Transition>
-        <div class="bg" :style=" runtimeData.sysConfig.option_view_background ?
-            `backdrop-filter: blur(${runtimeData.sysConfig .chat_background_blur}px);` : ''" />
+        <div class="bg" :style="{
+            'backdrop-filter': `blur(${runtimeData.sysConfig .chat_background_blur}px)`
+        }" />
     </div>
 </template>
 
+<script setup lang="ts">
+import app from '@renderer/main'
+import SendUtil from '@renderer/function/sender'
+import Option, { get } from '@renderer/function/option'
+import Info from '@renderer/pages/Info.vue'
+import MsgBody from '@renderer/components/MsgBody.vue'
+import NoticeBody from '@renderer/components/NoticeBody.vue'
+import FacePan from '@renderer/components/FacePan.vue'
+import MergePan from '@renderer/components/MergePan.vue'
+import imageCompression from 'browser-image-compression'
+
+import {
+    defineComponent,
+    markRaw,
+    reactive,
+    shallowReactive
+} from 'vue'
+import { v4 as uuid } from 'uuid'
+import {
+	scrollToMsg,
+    downloadFile,
+    loadHistory as loadHistoryFirst,
+    shouldAutoFocus,
+	vMenu,
+	vMove,
+	VMoveOptions,
+} from '@renderer/function/utils/appUtil'
+import {
+    getTimeConfig,
+    getTrueLang,
+    getViewTime,
+} from '@renderer/function/utils/systemUtil'
+import {
+    getMsgRawTxt,
+    sendMsgRaw,
+    getShowName,
+    isShowTime,
+    isDeleteMsg,
+} from '@renderer/function/utils/msgUtil'
+import { Logger, LogType, PopInfo, PopType } from '@renderer/function/base'
+import { Connector } from '@renderer/function/connect'
+import { runtimeData } from '@renderer/function/msg'
+import {
+    BaseChatInfoElem,
+    MsgItemElem,
+    SQCodeElem,
+    GroupMemberInfoElem,
+    UserFriendElem,
+    UserGroupElem,
+    MenuEventData,
+} from '@renderer/function/elements/information'
+import UserInfoPanComponent, { UserInfoPan } from '@renderer/components/UserInfoPan.vue'
+import { backend } from '@renderer/runtime/backend'
+import Emoji from '@renderer/function/model/emoji'
+import EmojiFace from '@renderer/components/EmojiFace.vue'
+import { Img } from '@renderer/function/model/img'
+
+type IUser = any
+
+const userInfoPanData = shallowReactive<{
+    user: undefined | IUser | number,
+    x: number,
+    y: number,
+}>({
+    user: undefined,
+    x: 0,
+    y: 0,
+})
+const userInfoPanFunc: UserInfoPan = {
+    open: (user: IUser | number, x: number, y: number) => {
+        if(user.level != undefined) {
+            userInfoPanData.user = user
+            userInfoPanData.x = x
+            userInfoPanData.y = y
+        }
+    },
+    close: () => {
+        userInfoPanData.user = undefined
+    },
+}
+</script>
+
 <script lang="ts">
-    import app from '@renderer/main'
-    import SendUtil from '@renderer/function/sender'
-    import Option, { get } from '@renderer/function/option'
-    import Info from '@renderer/pages/Info.vue'
-    import MsgBody from '@renderer/components/MsgBody.vue'
-    import NoticeBody from '@renderer/components/NoticeBody.vue'
-    import FacePan from '@renderer/components/FacePan.vue'
-    import MergePan from '@renderer/components/MergePan.vue'
-    import imageCompression from 'browser-image-compression'
-
-    import { defineComponent, markRaw, reactive } from 'vue'
-    import { v4 as uuid } from 'uuid'
-    import {
-        downloadFile,
-        loadHistory as loadHistoryFirst,
-    } from '@renderer/function/utils/appUtil'
-    import {
-        addBackendListener,
-        getTimeConfig,
-        getTrueLang,
-        getViewTime,
-    } from '@renderer/function/utils/systemUtil'
-    import {
-        getMsgRawTxt,
-        sendMsgRaw,
-        getFace,
-        getShowName,
-        isShowTime,
-        isDeleteMsg,
-    } from '@renderer/function/utils/msgUtil'
-    import { scrollToMsg } from '@renderer/function/utils/appUtil'
-    import { Logger, LogType, PopInfo, PopType } from '@renderer/function/base'
-    import { Connector } from '@renderer/function/connect'
-    import { runtimeData } from '@renderer/function/msg'
-    import {
-        BaseChatInfoElem,
-        MsgItemElem,
-        SQCodeElem,
-        GroupMemberInfoElem,
-        UserFriendElem,
-        UserGroupElem,
-    } from '@renderer/function/elements/information'
-
-
     export default defineComponent({
         name: 'ViewChat',
-        components: { Info, MsgBody, NoticeBody, FacePan, MergePan },
-        props: ['chat', 'list', 'mumberInfo', 'imgView'],
+        props: ['chat', 'list', 'imgView'],
         data() {
+            //#region == 窗口移动相关 ==================================================
+            const chatMoveOptions: VMoveOptions<HTMLDivElement> = {
+                beforeHook: (_) => {
+                    // 移除不需要的css
+                    const target = this.getTargetWin()
+                    if (!target) return
+                    target.style.transition = 'all 0s'
+                    // 禁用滚动
+                    const pan = document.getElementById('chat-pan')
+                    if (!pan) return
+                    const chat = pan.getElementsByClassName('chat')[0] as HTMLDivElement
+                    if(chat)
+                        chat.style.overflowY = 'hidden'
+                },
+                moveHook: (_, move: number) => {
+                    // 移动距离 css
+                    const target = this.getTargetWin()
+                    if (!target) return
+                    target.style.transform = 'translateX(' + move + 'px)'
+                },
+                endHook: (_) => {
+                    // 复原css
+                    const pan = document.getElementById('chat-pan')
+                    const chat = pan?.getElementsByClassName('chat')[0] as HTMLDivElement
+                    if(chat) {
+                        chat.style.overflowY = 'scroll'
+                    }
+                    const target = this.getTargetWin()
+                    if (!target) return
+                    target.style.transition = 'transform 0.3s'
+                    target.style.transform = ''
+                },
+                rightLimit: {
+                    value: 100,
+                    type: '%',
+                },
+                speedCondition: {
+                    minMove: {
+                        value: 0.5 * runtimeData.inch,
+                        type: 'px',
+                    },
+                    minSpeed: 5 * runtimeData.inch,
+                },
+                moveCondition: {
+                    minMove: {
+                        value: 33,
+                        type: '%',
+                    }
+                },
+            }
+            //#endregion
+
             return {
+                backend,
                 uuid,
                 getShowName,
                 fun: {
                     getMsgRawTxt: getMsgRawTxt,
                 },
                 Option: Option,
-                getFace: getFace,
                 Connector: Connector,
                 runtimeData: runtimeData,
                 getTimeConfig: getTimeConfig,
@@ -610,12 +684,12 @@
                     showMoreDetail: false,
                     showMsgMenu: false,
                     showForwardPan: false,
-                    openedMenuMsg: {} as any | null,
                     openChatInfo: false,
                     isReply: false,
                     isJinLoading: false,
                     onAtFind: false,
                     menuDisplay: {
+                        menuSelectedMsgId: null as string | null,
                         jumpToMsg: false,
                         add: true,
                         relpy: true,
@@ -642,12 +716,6 @@
                         msgOnTouchDown: false,
                         onMove: 'no',
                     },
-                    chatTouch: {
-                        startX: -1,
-                        startY: -1,
-                        openSuccess: false,
-                        onScroll: false
-                    }
                 },
                 details: [
                     { open: false },
@@ -664,24 +732,11 @@
                 selectCache: '',
                 replyMsgInfo: null,
                 atFindList: null as GroupMemberInfoElem[] | null,
-                getImgList: [] as {
-                    index: number
-                    message_id: string
-                    img_url: string
-                }[],
-                respondIds: [
-                    4, 5, 8, 9, 10, 12, 14, 16, 21, 23, 24, 25, 26, 27, 28, 29,
-                    30, 32, 33, 34, 38, 39, 41, 42, 43, 49, 53, 60, 63, 66, 74,
-                    75, 76, 78, 79, 85, 89, 96, 97, 98, 99, 100, 101, 102, 103,
-                    104, 106, 109, 111, 116, 118, 120, 122, 123, 124, 125, 129,
-                    144, 147, 171, 173, 174, 175, 176, 179, 180, 181, 182, 183,
-                    201, 203, 212, 214, 219, 222, 227, 232, 240, 243, 246, 262,
-                    264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 277, 278,
-                    281, 282, 284, 285, 287, 289, 290, 293, 294, 297, 298, 299,
-                    305, 306, 307, 314, 315, 318, 319, 320, 322, 324, 326,
-                ],
                 isShowTime,
                 isDeleteMsg,
+                isDev: import.meta.env.DEV,
+                chatMoveOptions,
+                chatImg: undefined as any
             }
         },
         watch: {
@@ -708,37 +763,24 @@
                     this.tags.isJinLoading = false
                 },
             )
-            // 为 viewer 绑定关闭事件
-            const viewer = app.config.globalProperties.$viewer
-            this.$watch(
-                () => viewer.hiding,
-                (newVall) => {
-                    if (newVall) {
-                        runtimeData.chatInfo.info.image_list = this.getImgList
-                    }
-                },
-            )
             // Capacitor：系统返回操作（Android）
-            if(runtimeData.tags.clientType == 'capacitor' &&
-                runtimeData.tags.platform === 'android') {
-                addBackendListener('App', 'backButton', () => {
-                    // PS：这儿复用了触屏操作的逻辑……所以看起来怪怪的
-                    this.tags.chatTouch.openSuccess = true
-                    this.chatMoveEnd()
+            if(backend.type == 'capacitor' && backend.platform === 'android') {
+                backend.addListener('App', 'backButton', () => {
+                    this.exitWin()
                 })
             }
             // Web：系统返回操作
             this.$watch(() => runtimeData.watch.backTimes, () => {
-                // PS：这儿复用了触屏操作的逻辑……所以看起来怪怪的
-                this.tags.chatTouch.openSuccess = true
-                    this.chatMoveEnd()
+                this.exitWin()
+
             })
         },
         methods: {
             jumpSearchMsg() {
                 this.closeSearch()
                 setTimeout(() => {
-                    this.scrollToMsg(this.tags.openedMenuMsg?.id)
+                    if (!this.selectedMsg) return
+                    this.scrollToMsg('chat-' + this.selectedMsg?.message_id)
                     this.closeMsgMenu()
                 }, 100)
             },
@@ -796,6 +838,8 @@
                     const firstMsgId = this.list[0].message_id
                     // 锁定加载防止反复触发
                     this.tags.nowGetHistroy = true
+					// 移除加载失败标志
+					runtimeData.tags.loadHistoryFail = false
                     // 发起获取历史消息请求
                     const fullPage =
                         runtimeData.jsonMap.message_list?.pagerType == 'full'
@@ -922,7 +966,8 @@
              * 通过表单提交方式发送消息
              * PS：主要用来解决一些奇奇怪怪的回车判定导致的问题
              */
-            mainSubmit() {
+            mainSubmit(event) {
+                event.preventDefault()
                 if (this.msg != '') {
                     this.sendMsg()
                 }
@@ -990,8 +1035,9 @@
              * @param event 右击事件
              * @param data 消息信息
              */
-            showMsgMeun(event: Event, data: any) {
+            showMsgMeun(event: MenuEventData, data: any) {
                 this.selectedMsg = data
+                this.tags.menuDisplay.menuSelectedMsgId = data.message_id
 
                 if (Option.get('log_level') === 'debug') {
                     new Logger().debug('右击消息：' + data)
@@ -1002,7 +1048,6 @@
                 }
 
                 const menu = document.getElementById('msgMenu')
-                let msg = event.currentTarget as HTMLDivElement
                 const select = event.target as HTMLElement
                 let selectUserType = 'member'
                 if (
@@ -1017,12 +1062,8 @@
                         },
                     )
                 }
-                // FIX：Safari 的 contextmenu 事件并没有返回 currentTarget
-                // 如果没有获取到 currentTarget，使用屏幕点击事件得到的值
-                if (msg == null && this.tags.openedMenuMsg) {
-                    msg = this.tags.openedMenuMsg.msg
-                }
-                if (menu !== null && msg !== null) {
+
+                if (menu !== null && data !== null) {
                     // 关闭回应功能
                     if (get('close_respond') == true) {
                         this.tags.menuDisplay.showRespond = false
@@ -1113,7 +1154,7 @@
                             textBody.className.indexOf('msg-text') > -1 &&
                             selection.focusNode == selection.anchorNode &&
                             textMsg &&
-                            textMsg.id == msg.id
+                            textMsg.id == data.message_id
                         ) {
                             // 用于判定是否选中了 msg-text 且开始和结束是同一个 Node（防止跨消息复制）
                             this.selectCache = selection.toString()
@@ -1137,23 +1178,8 @@
                         }
                     }
                     // 鼠标位置
-                    const pointEvent =
-                        (event as PointerEvent) ||
-                        (window.event as PointerEvent)
-                    let pointX =
-                        pointEvent.clientX -
-                        msg.getBoundingClientRect().left +
-                        20
-                    let pointY = pointEvent.clientY
-                    // FIX：Safari 的 contextmenu 事件的 Event 不完整
-                    // 如果无法获取坐标则从触屏事件获取
-                    if (pointY == undefined) {
-                        pointX =
-                            this.tags.openedMenuMsg.x -
-                            msg.getBoundingClientRect().left +
-                            20
-                        pointY = this.tags.openedMenuMsg.y
-                    }
+                    const pointX = event.x
+                    const pointY = event.y
                     // 移动菜单位置
                     menu.style.marginLeft = pointX + 'px'
                     menu.style.marginTop = pointY + 'px'
@@ -1164,9 +1190,9 @@
                         const item = menu.children[0] as HTMLDivElement
                         menuWidth = item.clientWidth
                     }
-                    const msgWidth = msg.offsetWidth
-                    if (pointX + menuWidth > msgWidth + 27) {
-                        menu.style.marginLeft = msgWidth + 7 - menuWidth + 'px'
+                    const maxWidth = window.innerWidth
+                    if (pointX + menuWidth > maxWidth + 27) {
+                        menu.style.marginLeft = maxWidth + 7 - menuWidth + 'px'
                     }
                     // 显示菜单
                     this.tags.showMsgMenu = true
@@ -1181,7 +1207,6 @@
                                 bodyHeight - menuHeight - 10 + 'px'
                         }
                     }, 100)
-                    this.tags.openedMenuMsg = msg
                 }
             },
 
@@ -1190,6 +1215,7 @@
              */
             initMenuDisplay() {
                 this.tags.menuDisplay = {
+                    menuSelectedMsgId : null,
                     jumpToMsg: false,
                     add: true,
                     relpy: true,
@@ -1211,26 +1237,30 @@
             /**
              * 回复消息
              */
-            replyMsg(closeMenu = true) {
+            menuReplyMsg(closeMenu = true) {
                 const msg = this.selectedMsg
-                if (msg !== null) {
-                    const msgId = msg.message_id
-                    // 添加回复内容
-                    // PS：这儿还是用旧的方式 …… 因为新的调用不友好。回复消息不会被加入文本行，在消息发送器内有特殊判定。
-                    this.addSpecialMsg({
-                        msgObj: { type: 'reply', id: String(msgId) },
-                        addText: false,
-                        addTop: true,
-                    })
-                    // 显示回复指示器
-                    this.tags.isReply = true
-                    // 聚焦输入框
-                    this.toMainInput()
-                    // 关闭消息菜单
-                    if (closeMenu) {
-                        this.closeMsgMenu()
-                    }
+                if (!msg) return
+
+                this.replyMsg(msg)
+                // 关闭消息菜单
+                if (closeMenu) {
+                    this.closeMsgMenu()
                 }
+            },
+            replyMsg(msg: any) {
+                const msgId = msg.message_id
+                this.selectedMsg = msg
+                // 添加回复内容
+                // PS：这儿还是用旧的方式 …… 因为新的调用不友好。回复消息不会被加入文本行，在消息发送器内有特殊判定。
+                this.addSpecialMsg({
+                    msgObj: { type: 'reply', id: String(msgId) },
+                    addText: false,
+                    addTop: true,
+                })
+                // 显示回复指示器
+                this.tags.isReply = true
+                // 聚焦输入框
+                this.toMainInput()
             },
 
             /**
@@ -1242,6 +1272,12 @@
                     return item.type !== 'reply'
                 })
                 this.tags.isReply = false
+            },
+
+            consoleLogMsg() {
+                if (!this.selectedMsg) return
+                // eslint-disable-next-line no-console
+                console.log(this.selectedMsg)
             },
 
             /**
@@ -1353,7 +1389,7 @@
                     // 二次确认转发
                     const popInfo = {
                         title: this.$t('合并转发消息'),
-                        template: MsgBody,
+                        template: markRaw(MsgBody),
                         templateValue: markRaw({ data: previewMsg, type: 'forward' }),
                         button: [
                             {
@@ -1392,7 +1428,7 @@
                     // 二次确认转发
                     const popInfo = {
                         title: this.$t('转发消息'),
-                        template: MsgBody,
+                        template: markRaw(MsgBody),
                         templateValue: markRaw({ data: msg, type: 'forward' }),
                         button: [
                             {
@@ -1443,8 +1479,10 @@
                     Connector.send(
                         runtimeData.jsonMap.send_respond.name,
                         {
+							group_id: this.chat.show.id,
                             message_id: msgId,
                             emoji_id: String(num),
+							code: String(num),
                         },
                         'SendRespondBack_' + msgId + '_' + num,
                     )
@@ -1570,23 +1608,12 @@
             },
 
             /**
-             * 获取悬浮窗显示位置
-             */
-            getPopPost() {
-                const x =
-                    this.mumberInfo.x === undefined ? '0' : this.mumberInfo.x
-                const y =
-                    this.mumberInfo.y === undefined ? '0' : this.mumberInfo.y
-                return 'margin-left:' + x + 'px;margin-top:' + y + 'px;'
-            },
-
-            /**
              * 关闭右击菜单
              */
             closeMsgMenu() {
                 // 关闭菜单
                 this.tags.showMsgMenu = false
-                if (this.tags.openedMenuMsg) this.tags.openedMenuMsg = null
+                this.tags.menuDisplay.menuSelectedMsgId = null
                 setTimeout(() => {
                     // 重置菜单显示状态
                     this.initMenuDisplay()
@@ -1632,20 +1659,22 @@
                             Object.keys(this.chat.info.group_notices).length ===
                                 0)
                     ) {
-                        if (noticeName && noticeName != 'http_proxy') {
+                        if (noticeName) {
                             Connector.send(
                                 noticeName,
                                 { group_id: this.chat.show.id },
                                 'getGroupNotices',
                             )
-                        } else {
-                            const url = `https://web.qun.qq.com/cgi-bin/announce/get_t_list?bkn=${runtimeData.loginInfo.bkn}&qid=${this.chat.show.id}&ft=23&s=-1&n=20`
-                            Connector.send(
-                                'http_proxy',
-                                { url: url },
-                                'getGroupNotices',
-                            )
                         }
+                        // 反正运行不了，注释了
+                        // {
+                        //     const url = `https://web.qun.qq.com/cgi-bin/announce/get_t_list?bkn=${runtimeData.loginInfo.bkn}&qid=${this.chat.show.id}&ft=23&s=-1&n=20`
+                        //     Connector.send(
+                        //         'http_proxy',
+                        //         { url: url },
+                        //         'getGroupNotices',
+                        //     )
+                        // }
                     }
                     // 加载群文件列表
                     if (this.chat.show.type === 'group' && Object.keys(this.chat.info.group_files).length === 0) {
@@ -1969,7 +1998,7 @@
                             'setMessageRead',
                         )
                     }
-                    if(['electron', 'tauri'].includes(runtimeData.tags.clientType)) {
+                    if(shouldAutoFocus()) {
                         // 将焦点移动到发送框
                         this.toMainInput()
                     }
@@ -2041,9 +2070,7 @@
                         }
                         // 刷新图片列表
                         // TODO: 需要优化性能
-                        let initMainList = false
-                        if (this.getImgList.length == 0) initMainList = true
-                        this.getImgList = []
+                        const getImgList = [] as string[]
                         this.list.forEach((item: any) => {
                             if (item.message !== undefined) {
                                 item.message.forEach((msg: MsgItemElem) => {
@@ -2051,21 +2078,12 @@
                                         msg.type === 'image' &&
                                         msg.file != 'marketface'
                                     ) {
-                                        const info = {
-                                            index: item.message_id,
-                                            message_id: item.message_id,
-                                            img_url: runtimeData.tags.proxyPort && msg.url.startsWith('http') ? `http://localhost:${runtimeData.tags.proxyPort}/assets?url=${encodeURIComponent(msg.url)}` : msg.url
-                                        }
-                                        this.getImgList.push(info)
+                                        getImgList.push(msg.url)
                                     }
                                 })
                             }
                         })
-                        const viewer = app.config.globalProperties.$viewer
-                        if (!viewer.isShown || initMainList) {
-                            runtimeData.chatInfo.info.image_list =
-                                this.getImgList
-                        }
+                        this.chatImg = Img.fromList(getImgList)
                         // 处理跳入跳转预设
                         // 如果 jump 参数不是 undefined，则意味着这次加载历史记录的同时需要跳转到指定的消息
                         if (
@@ -2147,109 +2165,6 @@
                         popInfo.add(PopType.ERR, this.$t('复制失败'), true)
                     },
                 )
-            },
-
-            /**
-             * 消息触屏开始
-             * @param event 触摸事件
-             */
-            msgStartMove(event: TouchEvent, msg: any) {
-                const logger = new Logger()
-                logger.add(LogType.UI, '消息触屏点击事件开始 ……')
-                this.tags.msgTouch.msgOnTouchDown = true
-                this.tags.msgTouch.x = event.targetTouches[0].pageX
-                this.tags.msgTouch.y = event.targetTouches[0].pageY
-
-                // PS：保存这个只是在 Safari 下菜单事件无法获取到
-                this.tags.openedMenuMsg = {
-                    msg: event.currentTarget as HTMLDivElement,
-                    x: event.targetTouches[0].pageX,
-                    y: event.targetTouches[0].pageY,
-                }
-
-                // 消息长按事件，计时判定长按
-                setTimeout(() => {
-                    logger.add(
-                        LogType.UI,
-                        '消息触屏长按判定：' +
-                            this.tags.msgTouch.msgOnTouchDown,
-                    )
-                    if (this.tags.msgTouch.msgOnTouchDown === true) {
-                        this.showMsgMeun(event, msg)
-                    }
-                }, 400)
-            },
-
-            /**
-             * 消息触屏移动
-             * @param event 触摸事件
-             */
-            msgOnMove(event: TouchEvent) {
-                const logger = new Logger()
-                const sender = event.currentTarget as HTMLDivElement
-                const msgPan = document.getElementById('msgPan')
-                // 开始点击的位置
-                const startX = this.tags.msgTouch.x
-                const startY = this.tags.msgTouch.y
-                // TODO: 懒得写了，移动的允许范围，用来防止按住了挪出控件范围导致无法触发 end
-                // const maxTop = sender.
-                if (startX > -1 && startY > -1 && msgPan) {
-                    // 计算移动差值
-                    const dx = Math.abs(startX - event.targetTouches[0].pageX)
-                    const dy = Math.abs(startY - event.targetTouches[0].pageY)
-                    const x = startX - event.targetTouches[0].pageX
-                    // 如果 dy 大于 10px 则判定为用户在滚动页面，打断长按消息判定
-                    if (dy > 10) {
-                        this.tags.chatTouch.onScroll = true
-                    }
-                    if (dy > 10 || dx > 5) {
-                        if (this.tags.msgTouch.msgOnTouchDown) {
-                            logger.add(LogType.UI, '用户正在滑动，打断长按判定。')
-                            this.tags.msgTouch.msgOnTouchDown = false
-                        }
-                    }
-                    if (dy < sender.offsetHeight / 3 && dy < 40) {
-                        this.tags.msgTouch.onMove = 'on'
-                        if (x > 10) {
-                            // 右滑
-                            if (dx >= sender.offsetWidth / 3) {
-                                this.tags.msgTouch.onMove = 'left'
-                                logger.add(
-                                    LogType.UI,
-                                    '触发左滑判定 ……（回复）',
-                                )
-                            } else {
-                                sender.style.transform =
-                                    'translate(-' + (Math.sqrt(dx) + 5) + 'px)'
-                                sender.style.transition = 'transform 0s'
-                            }
-                        }
-                    } else {
-                        this.tags.msgTouch.onMove = 'no'
-                        sender.style.transform = 'translate(0px)'
-                    }
-                }
-            },
-
-            /**
-             * 消息触屏结束
-             * @param event 触摸事件
-             * @param msg 消息对象
-             */
-            msgMoveEnd(event: Event, msg: any) {
-                const sender = event.currentTarget as HTMLDivElement
-                sender.style.transform = 'translate(0px)'
-                // 判断操作
-                if (this.tags.msgTouch.onMove == 'left') {
-                    // 左滑回复
-                    this.selectedMsg = msg
-                    this.replyMsg(false)
-                } else if (this.tags.msgTouch.onMove == 'right') {
-                    // 右滑转发
-                }
-                // 重置数据
-                const data = (this as any).$options.data(this)
-                this.tags.msgTouch = data.tags.msgTouch
             },
 
             /**
@@ -2362,18 +2277,20 @@
                     item.open = false
                 })
                 // 如果有关闭操作，就不打开更多功能菜单
-                if(!hasOpen) {
-                    if (type == 'default') {
-                        this.tags.showMoreDetail = !this.tags.showMoreDetail
-                    } else {
-                        this.tags.showMoreDetail = false
-                        // 打开指定的更多功能菜单
-                        switch(type) {
-                            case 'img': this.runSelectImg(); break
-                            case 'file': this.runSelectFile(); break
-                            case 'face': this.details[1].open = !this.details[1].open; break
-                        }
-                    }
+                if (hasOpen) return
+
+                // 如果更多功能菜单已经打开，则关闭
+                if (this.tags.showMoreDetail) {
+                    this.tags.showMoreDetail = false
+                    return
+                }
+
+                // 打开指定的更多功能菜单
+                switch(type) {
+                    case 'default': this.tags.showMoreDetail = true; break
+                    case 'img': this.runSelectImg(); break
+                    case 'file': this.runSelectFile(); break
+                    case 'face': this.details[1].open = !this.details[1].open; break
                 }
             },
 
@@ -2381,119 +2298,49 @@
                 runtimeData.tags.openSideBar = !runtimeData.tags.openSideBar
             },
 
-            // 聊天面板右滑操作
-            ChatOnMove(event: TouchEvent) {
+            /**
+             * 得到焦点窗口
+             */
+            getTargetWin(): HTMLDivElement | undefined {
                 const chatPan = document.getElementById('chat-pan')
-                if(chatPan) {
-                    // 暂时去除 transition 过渡防止不跟手
-                    chatPan.style.transition = 'all 0s'
-                    // 获取 x 轴的位置
-                    const x = event.targetTouches[0].pageX
-                    const y = event.targetTouches[0].pageY
-                    // 记录开始位置
-                    if(this.tags.chatTouch.startX == -1) {
-                        this.tags.chatTouch.startX = x
-                    }
-                    if(this.tags.chatTouch.startY == -1) {
-                        this.tags.chatTouch.startY  = y
-                    }
-                    const moveX = Math.abs(x - this.tags.chatTouch.startX)
-                    const moveY = Math.abs(y - this.tags.chatTouch.startY)
-                    const width = document.body.clientWidth
-                    const heightAllow = document.body.clientHeight * 0.05
-
-                    const allowMove = moveX > moveY
-                        && moveY < heightAllow
-                        && x - this.tags.chatTouch.startX > 0
-                    if(allowMove) {
-                        const isMergeShow = (this.$refs.mergePan as InstanceType<typeof MergePan>).isMergeOpen()
-                        if(this.tags.openChatInfo) {
-                            // 聊天信息面板返回
-                            const infoPan = chatPan.getElementsByClassName('chat-info-pan')[0] as HTMLDivElement
-                            if(infoPan) {
-                                infoPan.style.transition = 'all 0s'
-                                infoPan.style.transform =
-                                    'translateX(' + (x - this.tags.chatTouch.startX) + 'px)'
-                                this.tags.chatTouch.openSuccess =
-                                    moveX > width / 3
-                            }
-                        } else if(isMergeShow) {
-                            // 合并转发面板返回
-                            const mergePan = chatPan.getElementsByClassName('merge-pan')[0] as HTMLDivElement
-                            if(mergePan) {
-                                mergePan.style.transition = 'all 0s'
-                                mergePan.style.transform =
-                                    'translateX(' + (x - this.tags.chatTouch.startX) + 'px)'
-                                this.tags.chatTouch.openSuccess =
-                                    moveX > width / 3
-                            }
-                        } else {
-                            // 聊天面板底层返回
-                            chatPan.style.transform = 'translateX(' + (x - this.tags.chatTouch.startX) + 'px)'
-                            this.tags.chatTouch.openSuccess = moveX > width / 3
-                            // 禁用滚动
-                            const chat = chatPan.getElementsByClassName('chat')[0] as HTMLDivElement
-                            if(chat) {
-                                chat.style.overflowY = 'hidden'
-                            }
-                        }
-                    }
+                if (!chatPan) return
+                const mergePan = this.$refs.mergePan as InstanceType<typeof MergePan>
+                if(this.tags.openChatInfo) {
+                    // 聊天信息面板返回
+                    return chatPan.getElementsByClassName('chat-info-pan')[0] as HTMLDivElement
+                } else if(mergePan?.isMergeOpen()) {
+                    // 合并转发面板返回
+                    return chatPan.getElementsByClassName('merge-pan')[0] as HTMLDivElement
+                } else {
+                    // 聊天面板底层返回
+                    return chatPan as HTMLDivElement
                 }
             },
-
-            // 聊天面板右滑结束
-            chatMoveEnd() {
-                this.tags.chatTouch.startX = -1
-                this.tags.chatTouch.startY = -1
-                const chatPan = document.getElementById('chat-pan')
-                if(chatPan) {
-                    const isMergeShow = (this.$refs.mergePan as InstanceType<typeof MergePan>).isMergeOpen()
-                    if(!this.tags.chatTouch.openSuccess) {
-                        if(this.tags.openChatInfo) {
-                            const infoPan = chatPan.getElementsByClassName('chat-info-pan')[0] as HTMLDivElement
-                            if(infoPan) {
-                                infoPan.style.transition = 'transform 0.3s'
-                                infoPan.style.transform = ''
-                            }
-                        } else if(isMergeShow) {
-                            const mergePan = chatPan.getElementsByClassName('merge-pan')[0] as HTMLDivElement
-                            if(mergePan) {
-                                mergePan.style.transform = ''
-                            }
-                        } else {
-                            runtimeData.tags.openSideBar = false
-                        }
-                    } else {
-                        if(this.tags.openChatInfo) {
-                            this.openChatInfoPan()
-                        } else if(isMergeShow) {
-                            (this.$refs.mergePan as InstanceType<typeof MergePan>).closeMergeMsg()
-                            setTimeout(() => {
-                                const mergePan = chatPan.getElementsByClassName('merge-pan')[0] as HTMLDivElement
-                                if(mergePan) {
-                                    mergePan.style.transform = ''
-                                }
-                            }, 500)
-                        } else {
-                            runtimeData.chatInfo.show.id = 0
-                            runtimeData.tags.openSideBar = true
-                            new Logger().add(LogType.UI, '右滑打开侧边栏触发完成')
-                        }
-                    }
-                    // 恢复过渡效果，完成撒手之后的剩余动画
-                    chatPan.style.transition = ''
+            /**
+             * 退出一层窗口
+             */
+            exitWin() {
+                const mergePan = this.$refs.mergePan as InstanceType<typeof MergePan>
+                if(this.tags.openChatInfo) {
+                    // 会话信息栏
+                    this.openChatInfoPan()
+                } else if(mergePan?.isMergeOpen()) {
+                    // 合并转发栏
+                    mergePan?.closeMergeMsg()
                     setTimeout(() => {
-                        chatPan.style.transform = ''
-                    }, 100)
-                    // 恢复滚动
-                    const chat = chatPan.getElementsByClassName('chat')[0] as HTMLDivElement
-                    if(chat) {
-                        chat.style.overflowY = 'scroll'
-                    }
+                        const chatPan = document.getElementById('chat-pan')
+                        const mergePan = chatPan!.getElementsByClassName('merge-pan')[0] as HTMLDivElement
+                        if(mergePan) {
+                            mergePan.style.transform = ''
+                        }
+                    }, 500)
+                } else {
+                    // 自身
+                    runtimeData.chatInfo.show.id = 0
+                    runtimeData.tags.openSideBar = true
+                    new Logger().add(LogType.UI, '右滑打开侧边栏触发完成')
                 }
-                this.tags.chatTouch.openSuccess = false
-                this.tags.chatTouch.onScroll = false
-            }
+            },
         },
     })
 </script>

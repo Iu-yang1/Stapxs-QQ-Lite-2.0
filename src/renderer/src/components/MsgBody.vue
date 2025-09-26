@@ -7,10 +7,11 @@
  * @Version:
  *      1.0 - 初始版本
  *      1.5 - 重构为 ts 版本，代码格式优化
- -->
+-->
 
 <template>
     <div :id="'chat-' + data.message_id"
+        ref="msgMain"
         :class="'message' +
             (type ? ' ' + type : '') +
             (data.revoke ? ' revoke' : '') +
@@ -21,8 +22,13 @@
         :data-time="data.time"
         @mouseleave="hiddenUserInfo">
         <img v-show="!isMe || type == 'merge'"
+            v-menu.prevent="event => $emit('showMenu', event, data)"
             name="avatar"
             :src="'https://q1.qlogo.cn/g?b=qq&s=0&nk=' + data.sender.user_id"
+            :alt="data.sender.card ? data.sender.card : data.sender.nickname"
+            @mouseenter="userInfoHoverHandle($event, getUserById(data.sender.user_id))"
+            @mousemove="userInfoHoverHandle($event, getUserById(data.sender.user_id))"
+            @mouseleave="userInfoHoverEnd($event)"
             @dblclick="sendPoke">
         <div v-if="isMe && type != 'merge'"
             class="message-space" />
@@ -30,9 +36,9 @@
             :class="'sending left' + (isMe ? ' me' : '')">
             <font-awesome-icon :icon="['fas', 'spinner']" />
         </div>
-        <div :class="isMe ? type == 'merge' ? 'message-body' : 'message-body me' : 'message-body'">
+        <div :class="msgBodyClass">
             <template v-if="runtimeData.chatInfo.show.type == 'group' && !isMe">
-                <span v-if="senderInfo?.is_robot" class="robot">{{ $t('机器人') }}</span>
+                <span v-if="senderInfo && isRobot(senderInfo.user_id)" class="robot">{{ $t('机器人') }}</span>
                 <span v-if="senderInfo?.role == 'owner'" class="owner">{{ $t('群主') }}</span>
                 <span v-else-if="senderInfo?.role == 'admin'" class="admin">{{ $t('管理员') }}</span>
                 <span v-if="senderInfo?.title && senderInfo?.title != ''">{{ senderInfo?.title.replace(/[\u202A-\u202E\u2066-\u2069]/g, '') }}</span>
@@ -54,9 +60,25 @@
                     second: 'numeric',
                 }).format(getViewTime(getViewTime(data.time))) }}
             </a>
-            <div>
+            <div
+                v-menu.prevent="event => $emit('showMenu', event, data)"
+                v-move="moveOptions"
+                @v-move-left.prevent="$emit('leftMove', data)"
+                @v-move-right.prevent="$emit('rightMove', data)">
                 <!-- 消息体 -->
-                <template v-if="!hasCard()">
+                <template v-if="data.message.length === 0">
+                    <span class="msg-text" style="opacity: 0.5">{{ $t('空消息') }}</span>
+                </template>
+                <!-- 超级表情 -->
+                <template v-else-if="isSuperFaceMsg()">
+                    <div class="msg-img face alone"
+                        style="--width: 35vh">
+                        <Lottie v-once
+                            :animation-link="Emoji.get(Number(data.message[0].id))!.superValue!"
+                            :title="Emoji.get(Number(data.message[0].id))!.description" />
+                    </div>
+                </template>
+                <template v-else-if="!hasCard()">
                     <div v-for="(item, index) in data.message"
                         :key="data.message_id + '-m-' + index"
                         :class="View.isMsgInline(item.type) ? 'msg-inline' : ''">
@@ -64,7 +86,6 @@
                         <span v-else-if="isDebugMsg" class="msg-text">{{ item }}</span>
                         <template v-else-if="item.type == 'text'">
                             <div v-if="hasMarkdown()" class="msg-md-title" />
-                            <!-- {{ item.text }} -->
                             <span v-else v-show="item.text !== ''"
                                 class="msg-text" @click="textClick" v-html="textIndex[index]" />
                         </template>
@@ -72,25 +93,27 @@
                             :id="getMdHTML(item.content, 'msg-md-' + data.message_id)"
                             class="msg-md" />
                         <img v-else-if="item.type == 'image' && item.file == 'marketface'"
-                            :class=" imgStyle(data.message.length, index, item.asface) + ' msg-mface'"
+                            :class=" imgStyle(data.message.length, index, true) + ' msg-mface'"
                             :src="item.url"
+                            :alt="item.summary"
+                            @load="imageLoaded"
+                            @error="imgLoadFail">
+                        <img v-else-if="item.type == 'mface'"
+                            :class=" imgStyle(data.message.length, index, true) + ' msg-mface'"
+                            :src="item.url"
+                            :alt="item.summary"
                             @load="imageLoaded"
                             @error="imgLoadFail">
                         <img v-else-if="item.type == 'image'"
                             :title="(!item.summary || item.summary == '') ? $t('预览图片') : item.summary"
                             :alt="$t('图片')"
                             :class=" imgStyle(data.message.length, index, item.asface)"
-                            :src="runtimeData.tags.proxyPort && item.url.startsWith('http') ? `http://localhost:${runtimeData.tags.proxyPort}/assets?url=${encodeURIComponent(item.url)}` : item.url"
+                            :src="backend.proxyUrl(item.url)"
                             @load="imageLoaded"
                             @error="imgLoadFail"
-                            @click="imgClick(data.message_id)">
+                            @click="imgClick(item.url)">
                         <template v-else-if="item.type == 'face'">
-                            <img v-if="getFace(item.id)"
-                                :alt="item.text"
-                                class="msg-face"
-                                :src="getFace(item.id)"
-                                :title="item.text">
-                            <font-awesome-icon v-else :class="'msg-face-svg' + (isMe ? ' me' : '')" :icon="['fas', 'face-grin-wide']" />
+                            <EmojiFace :emoji="Emoji.get(Number(item.id))" class="msg-face" />
                         </template>
                         <span v-else-if="item.type == 'bface'"
                             style="font-style: italic; opacity: 0.7">
@@ -100,7 +123,11 @@
                             :class="getAtClass(item.qq)">
                             <a :data-id="item.qq"
                                 :data-group="data.group_id"
-                                @mouseenter="showUserInfo">{{ getAtName(item) }}</a>
+                                @mouseenter="userInfoHoverHandle($event, getAtMember(item.qq))"
+                                @mousemove="userInfoHoverHandle($event, getAtMember(item.qq))"
+                                @mouseleave="userInfoHoverEnd($event)">
+                                {{ getAtName(item) }}
+                            </a>
                         </div>
                         <div
                             v-else-if="item.type == 'file'" :class="'msg-file' + (isMe ? ' me' : '')">
@@ -110,7 +137,7 @@
                                         <font-awesome-icon :icon="['fas', 'file']" />
                                         {{ runtimeData.chatInfo.show.type == 'group' ? $t('群文件') : $t('离线文件') }}
                                     </a>
-                                    <p>{{ loadFileBase( item, item.name, data.message_id) }}</p>
+                                    <p>{{ loadFileBase( item, item.name ?? item.file_name, data.message_id) }}</p>
                                 </div>
                                 <i>{{ getSizeFromBytes(item.size ?? item.file_size) }}</i>
                             </div>
@@ -162,43 +189,39 @@
                                 @click="openMerge()">
                                 <span>{{ $t('合并转发消息') }}</span>
                                 <div class="forward-msg">
-                                    <div v-if="item.content === undefined">
-                                        <div class="loading">
-                                            <font-awesome-icon :icon="['fas', 'spinner']" />
-                                            {{ $t('加载中') }}
+                                    <template v-if="item.content && item.content.length > 0">
+                                        <div v-for="(i, indexItem) in item.content.slice(0, 3)"
+                                            :key="'raw-forward-' + indexItem">
+                                            {{ i.sender.nickname }}:
+                                            <span v-for="(msg, msgIndex) in i.message"
+                                                :key="'raw-forward-item-' + msgIndex">
+                                                <span v-if="msg.type == 'text'">
+                                                    {{ msg.text }}
+                                                </span>
+                                                <span v-else-if="msg.type == 'image'">
+                                                    [{{ $t('图片') }}]
+                                                </span>
+                                                <span v-else-if="msg.type == 'face' || msg.type == 'bface'">
+                                                    [{{ $t('表情') }}]
+                                                </span>
+                                                <span v-else-if="msg.type == 'file'">
+                                                    [{{ $t('文件') }}]{{ msg.data.file }}
+                                                </span>
+                                                <span v-else-if="msg.type == 'video'">
+                                                    [{{ $t('视频') }}]
+                                                </span>
+                                                <span v-else-if="msg.type == 'forward'">
+                                                    [{{ $t('聊天记录') }}]
+                                                </span>
+                                                <span v-else-if="msg.type == 'reply'">
+                                                    <!--原版QQ此处不做处理-->
+                                                </span>
+                                                <span v-else>
+                                                    [{{ $t('不支持的消息') }}]
+                                                </span>
+                                            </span>
                                         </div>
-                                    </div>
-                                    <div v-for="(i, indexItem) in item.content.slice(0, 3)" v-else-if="item.content.length > 0"
-                                        :key="'raw-forward-' + indexItem">
-                                        {{ i.sender.nickname }}:
-                                        <span v-for="(msg, msgIndex) in i.message"
-                                            :key="'raw-forward-item-' + msgIndex">
-                                            <span v-if="msg.type == 'text'">
-                                                {{ msg.text }}
-                                            </span>
-                                            <span v-else-if="msg.type == 'image'">
-                                                [{{ $t('图片') }}]
-                                            </span>
-                                            <span v-else-if="msg.type == 'face' || msg.type == 'bface'">
-                                                [{{ $t('表情') }}]
-                                            </span>
-                                            <span v-else-if="msg.type == 'file'">
-                                                [{{ $t('文件') }}]{{ msg.data.file }}
-                                            </span>
-                                            <span v-else-if="msg.type == 'video'">
-                                                [{{ $t('视频') }}]
-                                            </span>
-                                            <span v-else-if="msg.type == 'forward'">
-                                                [{{ $t('聊天记录') }}]
-                                            </span>
-                                            <span v-else-if="msg.type == 'reply'">
-                                                <!--原版QQ此处不做处理-->
-                                            </span>
-                                            <span v-else>
-                                                [{{ $t('不支持的消息') }}]
-                                            </span>
-                                        </span>
-                                    </div>
+                                    </template>
                                     <div v-else>
                                         {{ $t('加载失败') }}
                                     </div>
@@ -234,7 +257,8 @@
                         :key="data.message_id + '-m-' + index">
                         <CardMessage v-if="item.type == 'xml' || item.type == 'json'"
                             :id="data.message_id"
-                            :item="item" />
+                            :item="item"
+                            @page-view="loadLinkPreview" />
                     </template>
                 </template>
                 <!-- 链接预览框 -->
@@ -249,7 +273,8 @@
                                 title="查看图片"
                                 :src="pageViewInfo.img"
                                 @load="linkViewPicFin"
-                                @error="linkViewPicErr">
+                                @error="linkViewPicErr"
+                                @click="preImgClick(pageViewInfo.img)">
                             <div class="body">
                                 <p v-show="pageViewInfo.site">
                                     {{ pageViewInfo.site }}
@@ -265,7 +290,7 @@
                         <!-- 特殊 URL 的预览 -->
                         <div v-if="pageViewInfo.type == 'bilibili'" class="link-view-bilibili">
                             <div class="user">
-                                <img :src="runtimeData.tags.proxyPort ? `http://localhost:${runtimeData.tags.proxyPort}/assets?url=${encodeURIComponent(pageViewInfo.data.owner.face)}` : pageViewInfo.data.owner.face">
+                                <img :src="backend.proxyUrl(pageViewInfo.data.owner.face)">
                                 <span>{{ pageViewInfo.data.owner.name }}</span>
                                 <a>{{ Intl.DateTimeFormat(trueLang, {
                                     year: 'numeric',
@@ -275,7 +300,7 @@
                                     minute: 'numeric'
                                 }).format(getViewTime(pageViewInfo.data.public)) }}</a>
                             </div>
-                            <img :src="runtimeData.tags.proxyPort ? `http://localhost:${runtimeData.tags.proxyPort}/assets?url=${encodeURIComponent(pageViewInfo.data.pic)}` : pageViewInfo.data.pic">
+                            <img :src="backend.proxyUrl(pageViewInfo.data.pic)">
                             <span>{{ pageViewInfo.data.title }}</span>
                             <a>{{ pageViewInfo.data.desc }}</a>
                             <div class="data">
@@ -297,7 +322,7 @@
                                         <a v-if="pageViewInfo.data.info.free != null">{{ $t('（试听）') }}</a>
                                     </a>
                                     <span>{{ pageViewInfo.data.info.author.join('/') }}</span>
-                                    <audio :src="runtimeData.tags.proxyPort ? `http://localhost:${runtimeData.tags.proxyPort}/proxy?url=${pageViewInfo.data.play_link}` : pageViewInfo.data.play_link"
+                                    <audio :src="backend.proxyUrl(pageViewInfo.data.play_link)"
                                         @loadedmetadata="audioLoaded()"
                                         @timeupdate="audioUpdate()" />
                                     <div>
@@ -325,55 +350,164 @@
         <div v-if="data.emoji_like"
             :class="'emoji-like' + (isMe ? ' me' : '')">
             <div class="emoji-like-body">
-                <div v-for="info in data.emoji_like"
-                    v-show="getFace(info.emoji_id) != ''"
-                    :key="'respond-' + data.message_id + '-' + info.emoji_id">
-                    <img loading="lazy" :src="getFace(info.emoji_id) as any">
-                    <span>{{ info.count }}</span>
-                </div>
+                <TransitionGroup name="emoji-like">
+                    <template v-for="info, id in data.emojis" :key="'respond-' + data.message_id + '-' + id">
+                        <div :class="{
+                            'me-send': info.includes(runtimeData.loginInfo.uin),
+                        }">
+                            <EmojiFace :emoji="Emoji.get(Number(id))!" />
+                            <span>{{ info.length }}</span>
+                        </div>
+                    </template>
+                </TransitionGroup>
             </div>
         </div>
         <code style="display: none">{{ data.raw_message }}</code>
     </div>
 </template>
 
+<script setup lang="ts">
+import Option from '@renderer/function/option'
+import CardMessage from './msg-component/CardMessage.vue'
+import markdownit from 'markdown-it'
+
+import { MsgBodyFuns as ViewFuns } from '@renderer/function/model/msg-body'
+import { defineComponent, useTemplateRef } from 'vue'
+import { Connector } from '@renderer/function/connect'
+import { runtimeData } from '@renderer/function/msg'
+import { Logger, LogType, PopInfo, PopType } from '@renderer/function/base'
+import { StringifyOptions } from 'querystring'
+import { getMsgRawTxt, pokeAnime } from '@renderer/function/utils/msgUtil'
+import {
+    isRobot,
+    openLink,
+    sendStatEvent,
+    useStayEvent,
+	vMenu,
+	vMove,
+	VMoveOptions,
+} from '@renderer/function/utils/appUtil'
+import {
+    getSizeFromBytes,
+    getTrueLang,
+    getViewTime } from '@renderer/function/utils/systemUtil'
+import { linkView } from '@renderer/function/utils/linkViewUtil'
+import { MenuEventData, MergeStackData } from '@renderer/function/elements/information'
+import { backend } from '@renderer/runtime/backend'
+import Emoji from '@renderer/function/model/emoji'
+import EmojiFace from './EmojiFace.vue'
+import { Vue3Lottie as Lottie } from 'vue3-lottie'
+import { UserInfoPan } from './UserInfoPan.vue'
+import { Img } from '@renderer/function/model/img'
+
+type Msg = any
+type IUser = any
+
+const {
+    data,
+    selected,
+    type,
+    userInfoPan,
+} = defineProps<{
+    data: any
+    selected?: boolean
+    type?: string
+    userInfoPan?: UserInfoPan
+    imageListHeader?: Img | undefined
+}>()
+
+// 半 setup 半 旧的 api是这样的...旧的emit定义类型太麻烦了...
+// eslint-disable-next-line  @typescript-eslint/no-unused-vars
+const emit = defineEmits<{
+    scrollToMsg: [...args: any[]]
+    imageLoaded: [...args: any[]]
+    sendPoke: [...args: any[]]
+    leftMove: [msg: Msg]
+    rightMove: [msg: Msg]
+    showMenu: [event: MenuEventData, msg: Msg]
+}>()
+
+const msgMain = useTemplateRef<HTMLDivElement>('msgMain')
+
+const moveOptions: VMoveOptions<HTMLDivElement> = {
+    moveHook: (_, move: number) => {
+        const target = msgMain.value!
+        target.style.transform = 'translateX(' + move + 'px)'
+    },
+    endHook: (_) => {
+        const target = msgMain.value!
+
+        target.style.transform = ''
+        target.style.transition = 'all 0.3'
+    },
+    leftLimit: {
+        value: runtimeData.inch * 0.75,
+        type: 'px'
+    },
+    rightLimit: {
+        value: runtimeData.inch * 0.75,
+        type: 'px'
+    },
+    moveCondition: {
+        minMove: {
+            value: runtimeData.inch * 0.5,
+            type: 'px'
+        }
+    }
+}
+
+//#endregion
+
+//#region == 长按/覆盖监视器 =========================================================
+const {
+    handle: userInfoHoverHandle,
+    handleEnd: userInfoHoverEnd,
+} = useStayEvent(
+    (event: MouseEvent) => {
+        return {
+            x: event.clientX,
+            y: event.clientY,
+        }
+    },
+    {onFit: (eventData, ctx: number | IUser) => {
+        userInfoPan?.open(ctx, eventData.x, eventData.y)
+    },
+    onLeave: () => {
+        userInfoPan?.close()
+    }}, 495
+)
+//#endregion
+
+//#region == 工具函数 ================================================================
+function getAtMember(id: number): IUser | number {
+    const re = getUserById(id) ?? id
+    return re
+}
+function getUserById(id: number): IUser | undefined {
+    if (runtimeData.chatInfo.show.type === 'group') {
+        if (!runtimeData.chatInfo.info.group_members) return id
+        const user = runtimeData.chatInfo.info.group_members.find((item: IUser) => item.user_id == id)
+        if (user) return user
+        else return id
+    }else {
+        const user = runtimeData.userList.find((item: IUser) => item.user_id === id)
+        if (user) return user
+        else return id
+    }
+}
+//#endregion
+</script>
 <script lang="ts">
-    import Option from '@renderer/function/option'
-    import CardMessage from './msg-component/CardMessage.vue'
-    import app from '@renderer/main'
-    import markdownit from 'markdown-it'
-
-    import { MsgBodyFuns as ViewFuns } from '@renderer/function/model/msg-body'
-    import { defineComponent } from 'vue'
-    import { Connector } from '@renderer/function/connect'
-    import { getMessageList, runtimeData } from '@renderer/function/msg'
-    import { Logger, LogType, PopInfo, PopType } from '@renderer/function/base'
-    import { StringifyOptions } from 'querystring'
-    import { getFace, getMsgRawTxt, pokeAnime } from '@renderer/function/utils/msgUtil'
-    import {
-        openLink,
-        sendStatEvent,
-    } from '@renderer/function/utils/appUtil'
-    import {
-        callBackend,
-        getSizeFromBytes,
-        getTrueLang,
-        getViewTime } from '@renderer/function/utils/systemUtil'
-    import { linkView } from '@renderer/function/utils/linkViewUtil'
-    import { MergeStackData } from '@renderer/function/elements/information'
-
     export default defineComponent({
         name: 'MsgBody',
-        components: { CardMessage },
+        inject: ['viewer'],
         props: ['data', 'type', 'selected'],
-        emits: ['scrollToMsg', 'imageLoaded', 'sendPoke'],
         data() {
             return {
+                backend,
                 md: markdownit({ breaks: true }),
-                getFace: getFace,
-                getSizeFromBytes: getSizeFromBytes,
-                getViewTime: getViewTime,
                 isMe: false,
+                msgBodyClass: 'message-body',
                 isDebugMsg: Option.get('debug_msg'),
                 linkViewStyle: '',
                 View: ViewFuns,
@@ -384,6 +518,12 @@
                 senderInfo: null as any,
                 trueLang: getTrueLang(),
                 textIndex: {} as { [key: string]: number },
+                // 互动相关
+                msgMove: {
+                    move: 0,
+                    onScroll: 'none' as 'none' | 'touch' | 'wheel',
+                    touchLast: null as null | TouchEvent,
+                },
             }
         },
         mounted() {
@@ -415,15 +555,12 @@
                     this.parseText(i)
                 }
             }
-            // 初始化解析合并转发消息
-            if (this.data.message[0].type === 'forward'){
-                Connector.callApi('forward_msg', {id: this.data.message[0].id})
-                .then(data => {
-                    data = getMessageList(data)
-                    // PS：这个写法其实不合规，但是影响不大就这样罢
-                    // eslint-disable-next-line vue/no-mutating-props
-                    this.data.message[0].content = data
-                })
+            // 初始化消息状态（msgBody class）
+            if(this.isMe && this.type != 'merge') {
+                this.msgBodyClass += ' me'
+            }
+            if(this.isSuperFaceMsg()) {
+                this.msgBodyClass += ' super-face'
             }
         },
         methods: {
@@ -506,27 +643,18 @@
              * 图片点击
              * @param msgId 消息 ID
              */
-            imgClick(msgId: string) {
-                const images = runtimeData.mergeMessageImgList ?? runtimeData.chatInfo.info.image_list
-                if (images !== undefined) {
-                    // 寻找实际的序号
-                    let num = -1
-                    for (let i = 0; i < images.length; i++) {
-                        const item = images[i]
-                        if (item.message_id == msgId) {
-                            num = i
-                            break
-                        }
-                    }
-                    // 显示
-                    const viewer = app.config.globalProperties.$viewer
-                    if (num >= 0 && viewer) {
-                        viewer.view(num)
-                        viewer.show()
-                        runtimeData.tags.viewer.index = num
-                    } else {
-                        new PopInfo().add(PopType.INFO, this.$t('定位图片失败'))
-                    }
+            imgClick(url: string) {
+                if (this.viewer && this.imageListHeader) {
+                    (this.viewer as any).openBySrc(this.imageListHeader, url)
+                }
+            },
+
+            /**
+             * 预览图片点击
+             */
+            preImgClick(img: string) {
+                if (this.viewer) {
+                    (this.viewer as any).open(new Img(img))
                 }
             },
 
@@ -535,6 +663,13 @@
              */
             imageLoaded(event: Event) {
                 const img = event.target as HTMLImageElement
+                // 计算图片宽度
+                const vh = document.documentElement.clientHeight || document.body.clientHeight
+                const imgHeight = img.naturalHeight || img.height
+                let imgWidth = img.naturalWidth || img.width
+                if (imgHeight > vh * 0.35)
+                    imgWidth = (imgWidth * (vh * 0.35)) / imgHeight
+                img.style.setProperty('--width', `${imgWidth}px`)
                 this.$emit('imageLoaded', img.offsetHeight)
             },
 
@@ -624,7 +759,7 @@
                         let data = null as any
                         let finaLink = fistLink
                         try {
-                            finaLink = await callBackend('Onebot', 'sys:getFinalRedirectUrl', true, fistLink)
+                            finaLink = await backend.call('Onebot', 'sys:getFinalRedirectUrl', true, fistLink)
                             if(!finaLink) {
                                 finaLink = fistLink
                             }
@@ -640,8 +775,8 @@
                         }
                         // 通用 og 解析
                         if(!data) {
-                            if (runtimeData.tags.clientType != 'web') {
-                                let html = await callBackend('Onebot', 'sys:getHtml', true, finaLink)
+                            if (!backend.isWeb()) {
+                                let html = await backend.call('Onebot', 'sys:getHtml', true, finaLink)
                                 if(html) {
                                     const headEnd = html.indexOf('</head>')
                                     html = html.slice(0, headEnd)
@@ -721,28 +856,6 @@
             },
 
             /**
-             * 当鼠标悬停在 at 消息上时显示被 at 人的消息悬浮窗
-             * @param event 消息事件
-             */
-            showUserInfo(event: Event) {
-                const sender = event.currentTarget as HTMLDivElement
-                const id = sender.dataset.id
-                const group = sender.dataset.group
-                // 获取鼠标位置
-                const pointEvent =
-                    (event as MouseEvent) || (window.event as MouseEvent)
-                const pointX = pointEvent.offsetX
-                const pointY = pointEvent.clientY
-                // TODO: 出界判定不做了怪麻烦的
-                // 请求用户信息
-                Connector.send(
-                    'get_group_member_info',
-                    { group_id: group, user_id: id },
-                    'getGroupMemberInfo_' + pointX + '_' + pointY,
-                )
-            },
-
-            /**
              * 隐藏 At 信息面板
              */
             hiddenUserInfo() {
@@ -781,7 +894,7 @@
                     file_id: data.file_id,
                     group_id: runtimeData.chatInfo.show.type == 'group' ? runtimeData.chatInfo.show.id : undefined,
                 },
-                    'downloadFile_' + message_id + '_' + btoa(encodeURIComponent(data.name)),
+                    'downloadFile_' + message_id + '_' + btoa(encodeURIComponent(data.name ?? data.file_name)),
                 )
             },
 
@@ -896,18 +1009,26 @@
                         width: number
                         height: number
                     } | null
-                    if (['electron', 'tauri'].includes(runtimeData.tags.clientType)) {
-                        windowInfo = await callBackend('Onebot', 'win:getWindowInfo', true)
+                    if (backend.isDesktop()) {
+                        windowInfo = await backend.call('Onebot', 'win:getWindowInfo', true)
                     }
                     const message = document.getElementById('chat-' + this.data.message_id)
                     let item = document.getElementById('app')
-                    if (['electron', 'tauri'].includes(runtimeData.tags.clientType)) {
+                    if (backend.isDesktop()) {
                         item = message?.getElementsByClassName('poke-hand')[0] as HTMLImageElement
                     }
                     this.$nextTick(() => {
                         pokeAnime(item, windowInfo)
                     })
                 }
+            },
+
+            isSuperFaceMsg() {
+                if (runtimeData.sysConfig.use_super_face === false) return false
+                if (this.data.message.length !== 1) return false
+                const seg = this.data.message.at(0)
+                if (seg.type !== 'face') return
+                return Emoji.allSuperList.has(Number(seg.id))
             },
 
             getMdHTML(str: string, id: string) {
@@ -1058,40 +1179,51 @@
                 }
             },
             openMerge(){
+                const seg = this.data.message[0]
+                if (!seg.content) {
+                    new PopInfo().add(PopType.ERR, this.$t('合并转发解析失败'))
+                    return
+                }
+
                 const data: MergeStackData = {
                     messageList: [],
                     imageList: [],
                     placeCache: 0,
-                    ready: false,
                     forwardMsg: this.data
                 }
-                const seg = this.data.message[0]
-                if (seg.content !== undefined){
-                    data.ready = true
-                    data.messageList = seg.content
-                    // 提取合并转发中的消息图片列表
-                    const imgList = [] as {
-                        index: number
-                        message_id: string
-                        img_url: string
-                    }[]
-                    let index = 0
-                    data.messageList.forEach((item) => {
-                        item.message.forEach((msg) => {
-                            if (msg.type == 'image') {
-                                imgList.push({
-                                    index: index,
-                                    message_id: item.message_id,
-                                    img_url: msg.url,
-                                })
-                                index++
-                            }
-                        })
+
+                data.messageList = seg.content
+                // 提取合并转发中的消息图片列表
+                const imgList = [] as {
+                    index: number
+                    message_id: string
+                    img_url: string
+                }[]
+                let index = 0
+                data.messageList.forEach((item) => {
+                    item.message.forEach((msg) => {
+                        if (msg.type == 'image') {
+                            imgList.push({
+                                index: index,
+                                message_id: item.message_id,
+                                img_url: msg.url,
+                            })
+                            index++
+                        }
                     })
-                    data.imageList = imgList
-                }
+                })
+                data.imageList = imgList
+
                 runtimeData.mergeMsgStack.push(data)
-            }
+            },
+            isFace(item: any) {
+                if (item.asface) return true
+                // 这是神马鬼玩意？一个驼峰，一个下划线，真是一个协议段一个协议啊
+                else if (item.subType == 7) return true
+                else if (item.sub_type == 7) return true
+                return false
+            },
+            //#endregion
         },
     })
 </script>
@@ -1124,6 +1256,21 @@
         color: var(--color-font-2);
         margin-left: 10px;
         font-size: 0.8rem;
+    }
+    .emoji-like-body .emoji {
+        width: 20px;
+        height: 20px;
+        font-size: 1rem;
+        margin: 0;
+    }
+    .emoji-like-body div.me-send{
+        background-color: var(--color-main);
+    }
+    .emoji-like-body div.me-send:hover {
+        background: var(--color-font);
+    }
+    .emoji-like-body > div.me-send span {
+        color: var(--color-font-r);
     }
 
     @media (min-width: 992px) {

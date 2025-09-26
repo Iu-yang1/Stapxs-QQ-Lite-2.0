@@ -1,4 +1,5 @@
 dirs=(
+    # "node_modules"
     # web
     "dist"
     "stats.html"
@@ -14,7 +15,8 @@ dirs=(
     "src/mobile/android/app/release"
     "src/mobile/android/app/debug"
     # tauri
-    "src/tauri/target"
+    # "src/tauri/target"
+    "dist_tauri"
 )
 
 for dir in ${dirs[@]}; do

@@ -8,19 +8,33 @@ import Umami from '@stapxs/umami-logger-typescript'
 import AboutPan from '@renderer/components/AboutPan.vue'
 import UpdatePan from '@renderer/components/UpdatePan.vue'
 import WelPan from '@renderer/components/WelPan.vue'
+import MealHungryPan from '@renderer/components/notice-component/MealHungryPan.vue'
 
 import { KeyboardInfo } from '@capacitor/keyboard'
 import { LogType, Logger, PopInfo, PopType } from '@renderer/function/base'
 import { Connector, login } from '@renderer/function/connect'
 import { runtimeData } from '@renderer/function/msg'
-import { BaseChatInfoElem } from '@renderer/function/elements/information'
+import { BaseChatInfoElem, MenuEventData } from '@renderer/function/elements/information'
 import {
     hslToRgb,
-    callBackend,
     rgbToHsl,
-    addBackendListener
 } from '@renderer/function/utils/systemUtil'
-import { toRaw, nextTick } from 'vue'
+import {
+    markRaw,
+    defineAsyncComponent,
+    toRaw,
+    nextTick,
+    Directive,
+    WatchHandle,
+    onMounted,
+    onUnmounted,
+    ref,
+    watchEffect,
+    watch,
+    shallowReactive,
+    ShallowRef,
+    shallowRef,
+} from 'vue'
 import { sendMsgRaw } from './msgUtil'
 import { parseMsg } from '../sender'
 import { Notify } from '../notify'
@@ -66,13 +80,10 @@ export function scrollToMsg(seqName: string, showAnimation: boolean, showHighlig
  */
 export function openLink(url: string, external = false) {
     // 判断是不是 Electron，是的话打开内嵌 iframe
-    if (['electron', 'tauri'].includes(runtimeData.tags.clientType)) {
+    if (backend.isDesktop()) {
         if (!external && !runtimeData.sysConfig.close_browser) {
             runtimeData.popBoxList = []
-            if(runtimeData.tags.proxyPort) {
-                // 存在本地代理服务器
-                url = 'http://localhost:' + runtimeData.tags.proxyPort + '/proxy?url=' + encodeURIComponent(url)
-            }
+            url = backend.proxyUrl(url)
             const popInfo = {
                 html: `<iframe src="${url}" class="view-iframe"></iframe>`,
                 full: true,
@@ -90,10 +101,7 @@ export function openLink(url: string, external = false) {
                             if (shell) {
                                 shell.openExternal(url)
                             } else {
-                                if(runtimeData.tags.proxyPort) {
-                                    url = decodeURIComponent(url.replace(`http://localhost:${runtimeData.tags.proxyPort}/proxy?url=`, ''))
-                                }
-                                callBackend('', 'sys:openInBrowser', false, url)
+                                backend.call('', 'sys:openInBrowser', false, backend.proxyUrl(url))
                             }
                             runtimeData.popBoxList.shift()
                         },
@@ -113,10 +121,10 @@ export function openLink(url: string, external = false) {
             if (shell) {
                 shell.openExternal(url)
             } else {
-                if(runtimeData.tags.proxyPort) {
-                    url = decodeURIComponent(url.replace(`http://localhost:${runtimeData.tags.proxyPort}/proxy?url=`, ''))
+                if(backend.proxy) {
+                    url = decodeURIComponent(url.replace(`http://localhost:${backend.proxy}/proxy?url=`, ''))
                 }
-                callBackend('', 'sys:openInBrowser', false, url)
+                backend.call('', 'sys:openInBrowser', false, url)
             }
         }
     } else {
@@ -258,7 +266,7 @@ export function downloadFile(
             url = 'https' + url.substring(url.indexOf('://'))
         }
     }
-    if (runtimeData.tags.clientType == 'web') {
+    if (backend.isWeb()) {
         try {
             new FileDownloader({
                 url: url,
@@ -272,13 +280,13 @@ export function downloadFile(
             logger.error(e as Error, '下载文件失败')
         }
     } else {
-        addBackendListener(undefined, 'sys:downloadBack', (event, data) => {
+        backend.addListener(undefined, 'sys:downloadBack', (event, data) => {
             onprocess(data || event.payload)
         })
-        addBackendListener(undefined, 'sys:downloadCancel', (event, data) => {
+        backend.addListener(undefined, 'sys:downloadCancel', (event, data) => {
             oncancel(data || event.payload)
         })
-        callBackend(undefined, 'sys:download', false, {
+        backend.call(undefined, 'sys:download', false, {
             downloadPath: url,
             fileName: name,
         })
@@ -328,7 +336,7 @@ export function updateWinColor(color: string) {
 }
 export async function loadWinColor() {
     // 获取系统主题色
-    updateWinColor(await callBackend(undefined, 'sys:getWinColor', true))
+    updateWinColor(await backend.call(undefined, 'sys:getWinColor', true))
 }
 
 /**
@@ -337,7 +345,7 @@ export async function loadWinColor() {
 export function createMenu() {
     const { $t } = app.config.globalProperties
     // MacOS：初始化菜单
-    if (['electron', 'tauri'].includes(runtimeData.tags.clientType)) {
+    if (backend.isDesktop()) {
         // 初始化菜单
         const menuTitles = {} as { [key: string]: string }
         menuTitles.success = $t(
@@ -347,6 +355,8 @@ export function createMenu() {
             },
         )
 
+        menuTitles.repo = import.meta.env.VITE_APP_REPO_NAME
+
         menuTitles.title = $t('Stapxs QQ Lite')
         menuTitles.about = $t('关于') + ' ' + $t('Stapxs QQ Lite')
         menuTitles.update = $t('检查更新…')
@@ -354,6 +364,8 @@ export function createMenu() {
         menuTitles.hideOthers = $t('隐藏其他')
         menuTitles.unhide = $t('全部显示')
         menuTitles.quit = $t('退出') + ' ' + $t('Stapxs QQ Lite')
+
+        menuTitles.close = $t('关闭窗口')
 
         menuTitles.edit = $t('编辑')
         menuTitles.undo = $t('撤销')
@@ -376,13 +388,13 @@ export function createMenu() {
         menuTitles.feedback = $t('在 Github 上反馈问题')
         menuTitles.license = $t('许可协议')
 
-        callBackend(undefined, 'sys:createMenu', false,
-            runtimeData.tags.clientType == 'tauri' ? { data: menuTitles} : menuTitles)
+        backend.call(undefined, 'sys:createMenu', false,
+            backend.type == 'tauri' ? { data: menuTitles} : menuTitles)
     }
 }
 export function updateMenu(config: { parent: string, id: string; action: string; value: string }) {
     // MacOS：更新菜单
-    callBackend(undefined, 'sys:updateMenu', false, config)
+    backend.call(undefined, 'sys:updateMenu', false, config)
 }
 
 /**
@@ -390,20 +402,20 @@ export function updateMenu(config: { parent: string, id: string; action: string;
 */
 export function createIpc() {
     // 服务发现
-    addBackendListener(undefined, 'sys:serviceFound', (event, data) => {
+    backend.addListener(undefined, 'sys:serviceFound', (event, data) => {
         const info = data ?? event.payload
         setQuickLogin(info.address, info.port)
     })
     // bot 功能
-    addBackendListener(undefined, 'bot:flushUser', () => {
+    backend.addListener(undefined, 'bot:flushUser', () => {
         reloadUsers()
         popInfo.add(PopType.INFO, app.config.globalProperties.$t('刷新用户列表成功'))
     })
-    addBackendListener(undefined, 'bot:logout', () => {
+    backend.addListener(undefined, 'bot:logout', () => {
         option.remove('auto_connect')
         Connector.close()
     })
-    addBackendListener(undefined, 'bot:quickReply', (event, data) => {
+    backend.addListener(undefined, 'bot:quickReply', (event, data) => {
         const info = data ?? event.payload
         sendMsgRaw(info.id, info.type,
             parseMsg(info.content, [{ type: 'reply', id: String(info.msg) }], []), true)
@@ -416,42 +428,42 @@ export function createIpc() {
         }
     })
     // 应用功能
-    addBackendListener(undefined, 'app:about', () => {
+    backend.addListener(undefined, 'app:about', () => {
             const popInfo = {
                 title: app.config.globalProperties.$t('关于') + ' ' +
                         app.config.globalProperties.$t('Stapxs QQ Lite'),
-                template: AboutPan,
+                template: markRaw(AboutPan),
                 allowQuickClose: false,
             }
             runtimeData.popBoxList.push(popInfo)
         })
-    addBackendListener(undefined, 'sys:handleUri', (event, data) => {
+    backend.addListener(undefined, 'sys:handleUri', (event, data) => {
         logger.info(JSON.stringify(data ?? event.payload))
     })
-    addBackendListener(undefined, 'app:changeTab', (event, name) => {
+    backend.addListener(undefined, 'app:changeTab', (event, name) => {
         window.focus()
         document.getElementById('bar-' + (name ?? event.payload).toLowerCase())?.click()
     })
-    addBackendListener(undefined, 'app:openLink', (event, link) => {
+    backend.addListener(undefined, 'app:openLink', (event, link) => {
         openLink(link ?? event.payload)
     })
-    addBackendListener(undefined, 'app:error', (event, text) => {
+    backend.addListener(undefined, 'app:error', (event, text) => {
         new Logger().add(LogType.ERR, text ?? event.payload)
     })
-    addBackendListener(undefined, 'app:jumpChat', (event, data) => {
+    backend.addListener(undefined, 'app:jumpChat', (event, data) => {
         const info = data ?? event.payload
         jumpToChat(info.userId, info.msgId)
         new Notify().closeAll(info.userId)
     })
     // 后端连接模式
-    addBackendListener(undefined, 'onebot:onopen', (event, data) => {
+    backend.addListener(undefined, 'onebot:onopen', (event, data) => {
         const info = data ?? event.payload
         Connector.onopen(info.address, info.token)
     })
-    addBackendListener(undefined, 'onebot:onmessage', (event, message) => {
+    backend.addListener(undefined, 'onebot:onmessage', (event, message) => {
         Connector.onmessage(message ?? event.payload)
     })
-    addBackendListener(undefined, 'onebot:onclose', (event, data) => {
+    backend.addListener(undefined, 'onebot:onclose', (event, data) => {
         const info = data ?? event.payload
         Connector.onclose(info.code, info.reason || info.message, info.address, info.token)
     })
@@ -463,9 +475,9 @@ export function createIpc() {
 export async function loadMobile() {
     const { $t } = app.config.globalProperties
     // Capacitor：相关初始化
-    if(runtimeData.tags.clientType == 'capacitor') {
+    if(backend.isMobile()) {
         // 注册回调监听
-        addBackendListener('Onebot', 'onebot:event', (data) => {
+        backend.addListener('Onebot', 'onebot:event', (data) => {
             const msg = JSON.parse(data.data)
             switch(data.type) {
                 case 'onopen': Connector.onopen(login.address, login.token); break
@@ -487,17 +499,17 @@ export async function loadMobile() {
                 'width=device-width, initial-scale=0.9, maximum-scale=5, user-scalable=0'
         }
         // 通知
-        const permission = await callBackend('LocalNotifications', 'checkPermissions', true)
+        const permission = await backend.call('LocalNotifications', 'checkPermissions', true)
         const permissionStr = permission || permission.display
         if(permissionStr.indexOf('prompt') != -1) {
-            await callBackend('LocalNotifications', 'requestPermissions', false)
+            await backend.call('LocalNotifications', 'requestPermissions', false)
         } else if(permissionStr.indexOf('denied') != -1) {
             logger.error(null, '通知权限已被拒绝')
             logger.system('开发者阁下为什么要拒绝通知权限的请求呢？')
         } else {
             logger.debug('通知权限已开启')
             // 注册通知类型
-            callBackend('LocalNotifications', 'registerActionTypes', false,{
+            backend.call('LocalNotifications', 'registerActionTypes', false,{
                 types:[{
                     id: 'msgQuickReply',
                     actions: [{
@@ -511,7 +523,7 @@ export async function loadMobile() {
                 }] as ActionType[]
             })
             // 注册相关事件
-            addBackendListener('LocalNotifications', 'localNotificationActionPerformed', (info) => {
+            backend.addListener('LocalNotifications', 'localNotificationActionPerformed', (info) => {
                 const notification =
                     info.notification as LocalNotificationSchema
                 if(info.actionId == 'tap') {
@@ -537,8 +549,9 @@ export async function loadMobile() {
             })
         }
         // 键盘
-        callBackend('Keyboard', 'setAccessoryBarVisible', false, { isVisible: false })
-        addBackendListener('Keyboard', 'keyboardWillShow', async (info: KeyboardInfo) => {
+        backend.call('Keyboard', 'setAccessoryBarVisible', false, { isVisible: false })
+        backend.call('Keyboard', 'setResizeMode', false, { mode: 'none' })
+        backend.addListener('Keyboard', 'keyboardWillShow', async (info: KeyboardInfo) => {
             const keyboardHeight = info.keyboardHeight
 
             // 调整输入框高度
@@ -547,75 +560,71 @@ export async function loadMobile() {
                 sendMore.style.paddingBottom = '10px'
             }
 
-            const safeArea = await callBackend('SafeArea', 'getSafeArea', true)
+            const safeArea = await backend.call('SafeArea', 'getSafeArea', true)
             const tabBar = document.getElementsByTagName('ul')[0]
-            // 如果键盘高度低于高度的 1/3 且是 iOS 设备
-            // PS：这种情况下是物理键盘输入模式，它不是个完整键盘
-            //     这种情况下比较头疼，不能让 vebview 调整高度会出现黑色区域
-            if(runtimeData.tags.platform == 'ios' && keyboardHeight < window.innerHeight / 3) {
-                // 修改 ResizeMode
-                callBackend('Keyboard', 'setResizeMode', false, { mode: 'none' })
-                // 这种情况下需要进行正常的底部避让，调整 --safe-area-bottom
+            // iOS 26 后键盘背景是半透明的，不能让 webview 调整高度，会漏出背景的黑色
+            // 干脆把所有的 iOS 版本处理方法都改为内部避让
+            if(backend.platform == 'ios') {
                 const baseApp = document.getElementById('base-app')
                 if (safeArea && baseApp) {
-                    baseApp.style.setProperty('--safe-area-bottom', (keyboardHeight - safeArea.bottom + 10) + 'px')
+                    baseApp.style.setProperty('--safe-area-bottom', (keyboardHeight - safeArea.bottom + 100) + 'px')
                 }
                 // 调整菜单高度
                 if(safeArea && tabBar) {
-                    tabBar.style.setProperty('padding-bottom', safeArea.bottom + 'px', 'important')
+                    tabBar.style.setProperty('padding-bottom', (keyboardHeight - safeArea.bottom + 100) + 'px', 'important')
                 }
-            } else if (tabBar) {
-                // 调整菜单高度
-                tabBar.style.setProperty('padding-bottom', '10px', 'important')
             }
 
             // 调整整个 HTML 的高度
             // PS：仅用于解决 Android 在全屏沉浸式下键盘遮挡问题
             const html = document.getElementsByTagName('html')[0]
-            if(html && runtimeData.tags.platform == 'android') {
-                const safeArea = await callBackend('SafeArea', 'getSafeArea', true)
+            if(html && backend.platform == 'android') {
                 html.style.height = `calc(100% - ${keyboardHeight + safeArea.top}px)`
             }
         })
-        addBackendListener('Keyboard', 'keyboardWillHide', async () => {
-            callBackend('Keyboard', 'setResizeMode', false, { mode: 'native' })
-            const baseApp = document.getElementById('base-app')
-            const safeArea = await callBackend('SafeArea', 'getSafeArea', true)
-            if (safeArea && baseApp) {
-                baseApp.style.setProperty('--safe-area-bottom', safeArea.bottom + 'px')
-            }
-
-            const tabBar = document.getElementsByTagName('ul')[0]
-            if(tabBar) {
-                tabBar.style.paddingBottom = ''
-            }
+        backend.addListener('Keyboard', 'keyboardWillHide', async () => {
             const sendMore = document.getElementById('send-more')
             if(sendMore) {
                 sendMore.style.paddingBottom = 'var(--safe-area-bottom)'
             }
+            if(backend.platform == 'ios') {
+                const baseApp = document.getElementById('base-app')
+                const safeArea = await backend.call('SafeArea', 'getSafeArea', true)
+                if (safeArea && baseApp) {
+                    baseApp.style.setProperty('--safe-area-bottom', safeArea.bottom + 'px')
+                }
+
+                const tabBar = document.getElementsByTagName('ul')[0]
+                if(tabBar) {
+                    tabBar.style.paddingBottom = ''
+                }
+            }
             // 调整整个 HTML 的高度
             // PS：仅用于解决 Android 在全屏沉浸式下键盘遮挡问题
             const html = document.getElementsByTagName('html')[0]
-            if(html && runtimeData.tags.platform == 'android') {
+            if(html && backend.platform == 'android') {
                 html.style.height = 'calc(100%)'
             }
         })
         // 状态栏（Android）
-        callBackend('NavigationBar', 'setTransparency', false, { isTransparent: true })
-        callBackend('StatusBar', 'setOverlaysWebView', false, { overlay: true })
-        callBackend('StatusBar', 'setBackgroundColor', false, { color: '#ffffff00' })
+        backend.call('NavigationBar', 'setTransparency', false, { isTransparent: true })
+        backend.call('StatusBar', 'setOverlaysWebView', false, { overlay: true })
+        backend.call('StatusBar', 'setBackgroundColor', false, { color: '#ffffff00' })
     }
 }
 
 import horizontalCss from '@renderer/assets/css/append/mobile/append_mobile_horizontal.css?raw'
 import verticalCss from '@renderer/assets/css/append/mobile/append_mobile_vertical.css?raw'
 import { ActionType, LocalNotificationSchema } from '@capacitor/local-notifications'
+import { backend } from '@renderer/runtime/backend'
+import { NoticeBodyV3 } from '../elements/system'
+import { wheelMask } from '../input'
 // import windowsCss from '@renderer/assets/css/append/mobile/append_windows.css?raw'
 /**
 * 装载补充样式
 */
 export async function loadAppendStyle() {
-    const platform = runtimeData.tags.platform
+    const platform = backend.platform
     logger.info('正在装载补充样式……')
     if(platform != undefined) {
         import(`@renderer/assets/css/append/append_${platform}.css`)
@@ -641,15 +650,15 @@ export async function loadAppendStyle() {
             }
         }
 
-        if(['electron', 'tauri'].includes(runtimeData.tags.clientType)) {
-            callBackend(undefined, 'win:maximize', false)
+        if(backend.isDesktop()) {
+            backend.call(undefined, 'win:maximize', false)
             const topBar = document.getElementsByClassName('top-bar')[0] as HTMLElement
             if(topBar) {
                 topBar.style.display = 'none'
             }
         }
     }
-    if(runtimeData.tags.clientType == 'capacitor') {
+    if(backend.isMobile()) {
         const styleTag = document.createElement('style')
         styleTag.id = 'mobile-css'
         document.head.appendChild(styleTag)
@@ -661,22 +670,22 @@ export async function loadAppendStyle() {
     }
 
     // UI 2.0 附加样式
-    if (['electron', 'tauri'].includes(runtimeData.tags.clientType)) {
+    if (backend.isDesktop()) {
         import('@renderer/assets/css/append/append_new.css').then(() => {
             logger.info('UI 2.0 附加样式加载完成')
         })
     }
     // 透明 UI 附加样式
-    let subVersion = runtimeData.tags.release?.split('.') as any
+    let subVersion = backend.release?.split(' ')?.[1]?.split('.') as any
     subVersion = subVersion ? Number(subVersion[2]) : 0
-    if (['electron', 'tauri'].includes(runtimeData.tags.clientType) &&
+    if (backend.isDesktop() &&
         (platform == 'darwin' || (platform == 'win32' && subVersion > 22621))) {
         import('@renderer/assets/css/append/append_vibrancy.css').then(() => {
             logger.info('透明 UI 附加样式加载完成')
         })
     }
-    if (['electron', 'tauri'].includes(runtimeData.tags.clientType) && platform == 'linux') {
-        const gnomeExtInfo = await callBackend(undefined, 'sys:getGnomeExt', true)
+    if (backend.isDesktop() && platform == 'linux') {
+        const gnomeExtInfo = await backend.call(undefined, 'sys:getGnomeExt', true)
         if (gnomeExtInfo) {
             gnomeExtInfo.then((info: any) => {
                 if (
@@ -714,9 +723,10 @@ function setQuickLogin(address: string, port: number) {
 * 检查更新
 */
 export function checkUpdate() {
+    const repoName = import.meta.env.VITE_APP_REPO_NAME
     // 获取最新的 release 信息
     const packageUrl =
-        'https://api.github.com/repos/stapxs/Stapxs-QQ-Lite-2.0/releases/latest'
+        `https://api.github.com/repos/${repoName}/releases/latest`
     fetch(packageUrl).then((response) => {
         if (response.ok) {
             response.json().then((data) => {
@@ -780,7 +790,7 @@ function showReleaseLog(data: any, isUpdated: boolean) {
         message: msg,
         updated: isUpdated,
     }
-    const buttonGoUpdate = (runtimeData.tags.clientType != 'web') ? [
+    const buttonGoUpdate = (!backend.isWeb()) ? [
               {
                   text: $t('知道了'),
                   fun: () => runtimeData.popBoxList.shift(),
@@ -802,7 +812,7 @@ function showReleaseLog(data: any, isUpdated: boolean) {
               },
           ]
     const popInfo = {
-        template: UpdatePan,
+        template: markRaw(UpdatePan),
         templateValue: toRaw(info),
         button: isUpdated? [
                   {
@@ -827,11 +837,12 @@ function showReleaseLog(data: any, isUpdated: boolean) {
 export function checkOpenTimes() {
     if (import.meta.env.DEV) return     // 开发环境不显示
     const { $t } = app.config.globalProperties
+    const repoName = import.meta.env.VITE_APP_REPO_NAME
     const times = localStorage.getItem('times')
     if (times != null) {
         const getTimes = Number(times) + 1
         localStorage.setItem('times', getTimes.toString())
-        if (getTimes % 50 == 0) {
+        if (getTimes % 20 == 0) {
             // 构建 HTML
             let html =
                 '<div style="display:flex;flex-direction:column;padding:10px 5%;align-items:center;">'
@@ -856,8 +867,32 @@ export function checkOpenTimes() {
                         master: true,
                         fun: () => {
                             openLink(
-                                'https://github.com/Stapxs/Stapxs-QQ-Lite-2.0',
+                                `https://github.com/${repoName}`,
                             )
+                            runtimeData.popBoxList.shift()
+                        },
+                    },
+                ],
+            }
+            runtimeData.popBoxList.push(popInfo)
+        }
+        if (getTimes % 50 == 0 && import.meta.env.VITE_APP_SPONSORS_URL) {
+            const popInfo = {
+                title: '',
+                template: markRaw(MealHungryPan),
+                templateValue: { times: getTimes },
+                button: [
+                    {
+                        text: $t('打开…'),
+                        fun: () => {
+                            openLink(import.meta.env.VITE_APP_SPONSORS_URL)
+                            runtimeData.popBoxList.shift()
+                        },
+                    },
+                    {
+                        text: $t('好耶'),
+                        master: true,
+                        fun: () => {
                             runtimeData.popBoxList.shift()
                         },
                     },
@@ -874,7 +909,7 @@ export function checkOpenTimes() {
     if (guide != guideVersion.toString()) {
         // 首次打开，显示首次打开引导信息
         const popInfo = {
-            template: WelPan,
+            template: markRaw(WelPan),
             allowClose: false,
             button: [],
         }
@@ -887,8 +922,11 @@ export function checkOpenTimes() {
 * 显示全局公告弹窗
 */
 export function checkNotice() {
-    const url =
-        'https://lib.stapxs.cn/download/stapxs-qq-lite/notice-config.json'
+    let url = 'https://lib.stapxs.cn/download/stapxs-qq-lite/notice-config.json'
+    if(import.meta.env.DEV) {
+        url = 'notice_local.json'
+    }
+    const version = 3
     const fetchData = {
         time: new Date().getTime().toString(),
     } as Record<string, string>
@@ -903,51 +941,37 @@ export function checkNotice() {
             }
             // 解析公告列表
             data.forEach((notice: any) => {
-                let isShowInDate = false
-                if (!notice.show_date) {
-                    isShowInDate = true
-                } else if (
-                    typeof notice.show_date == 'string' &&
-                    new Date().toDateString() ===
-                        new Date(notice.show_date).toDateString()
-                ) {
-                    isShowInDate = true
-                } else if (typeof notice.show_date == 'object') {
-                    notice.show_date.forEach((date: number) => {
-                        if (
-                            new Date().toDateString() ===
-                            new Date(date).toDateString()
-                        ) {
-                            isShowInDate = true
+                if(notice.version == version && (notice.client == import.meta.env.VITE_APP_CLIENT_TAG || notice.client == 'all')) {
+                    const noticeBody = notice as NoticeBodyV3
+                    // 当前时间戳（毫秒）
+                    const now = new Date().getTime()
+                    noticeBody.show_date.forEach((dateInterval: number[]) => {
+                        if(dateInterval.length == 2) {
+                            // 判断是否在时间区间内
+                            if(now >= dateInterval[0] && now <= dateInterval[1]) {
+                                noticeBody.is_show = true
+                            }
                         }
                     })
-                }
-                if (
-                    notice.version == 2 &&
-                    noticeShow.indexOf(notice.id.toString()) < 0 &&
-                    isShowInDate
-                ) {
-                    // 加载公告弹窗列表
-                    for (let i = 0; i < notice.pops.length; i++) {
-                        // 添加弹窗
-                        const info = notice.pops[i]
-                        const popInfo = {
-                            title: info.title,
-                            html: info.html ? info.html : '',
-                            button: [
+                    if (noticeBody.is_important == true || (noticeBody.is_show && noticeBody.id && noticeShow.indexOf(noticeBody.id) < 0)) {
+                        // 加载公告弹窗列表
+                        for (let i = 0; i < noticeBody.pops.length; i++) {
+                            // 添加弹窗
+                            const info = noticeBody.pops[i]
+                            let popInfo = null as any
+                            const button = [
                                 {
                                     text:
-                                        notice.pops.length > 1 &&
-                                        i != notice.pops.length - 1? app.config.globalProperties.$t(
-                                                  '继续',
-                                              ): app.config.globalProperties.$t(
-                                                  '确定',
-                                              ),
+                                        /* eslint-disable */
+                                        noticeBody.pops.length > 1 && i != noticeBody.pops.length - 1 ?
+                                            app.config.globalProperties.$t('继续') :
+                                            (info.button_text ? info.button_text : app.config.globalProperties.$t('确定')),
+                                        /* eslint-enable */
                                     master: true,
                                     fun: () => {
                                         // 添加已读记录
-                                        if (noticeShow.indexOf(notice.id) < 0) {
-                                            noticeShow.push(notice.id)
+                                        if (noticeShow.indexOf(noticeBody.id) < 0 && !noticeBody.is_important) {
+                                            noticeShow.push(noticeBody.id)
                                         }
                                         localStorage.setItem(
                                             'notice_show',
@@ -957,9 +981,40 @@ export function checkNotice() {
                                         runtimeData.popBoxList.shift()
                                     },
                                 },
-                            ],
+                            ]
+                            if(info.link_url) {
+                                button.unshift({
+                                    text: app.config.globalProperties.$t('打开…'),
+                                    master: false,
+                                    fun: () => {
+                                        if(info.link_url) {
+                                            openLink(info.link_url)
+                                        }
+                                    }
+                                })
+                            }
+                            if (info.html) {
+                                popInfo = {
+                                    title: info.title,
+                                    html: info.html,
+                                    button: button
+                                }
+                            } else if(info.template) {
+                                popInfo = {
+                                    title: info.title,
+                                    template: markRaw(defineAsyncComponent(
+                                        () => import(`@renderer/components/notice-component/${info.template}.vue`),
+                                    )),
+                                    templateValue: markRaw(info.template_data ? info.template_data : {}),
+                                    button: button
+                                }
+                            } else {
+                                logger.error(null, '未知的公告类型')
+                            }
+                            if (popInfo) {
+                                runtimeData.popBoxList.push(popInfo)
+                            }
                         }
-                        runtimeData.popBoxList.push(popInfo)
                     }
                 }
             })
@@ -975,7 +1030,7 @@ export function checkNotice() {
 */
 export function BackendRequest(type: 'GET' | 'POST', url: string,
         cookies: string[], data: any = undefined) {
-    callBackend(undefined, 'sys:requestHttp', false, {
+    backend.call(undefined, 'sys:requestHttp', false, {
         type: type,
         url: url,
         cookies: JSON.stringify(cookies),
@@ -1032,13 +1087,23 @@ export function loadJsonMap(name: string) {
 }
 
 /**
-* UM：统计事件统一上传方法
+* UM：上报事件
 * @param event 事件名
 * @param data 数据
 */
-export function sendStatEvent(event: string, data: any) {
+export function sendStatEvent(event: string, data: { [key: string]: any }) {
     if (!option.get('close_ga') && !import.meta.env.DEV) {
         Umami.trackEvent(event, data)
+    }
+}
+
+/**
+ * UM：上报会话数据
+ * @param data 数据
+ */
+export function sendIdentifyData(data: { [key: string]: any }) {
+    if (!option.get('close_ga') && !import.meta.env.DEV) {
+        Umami.trackIdentify(data)
     }
 }
 
@@ -1067,3 +1132,743 @@ export function changeGroupNotice(group_id: number, open: boolean) {
         option.save('notice_group', noticeInfo)
     }
 }
+
+/**
+ * 是否应该自动聚焦输入框
+ * @returns
+ */
+export function shouldAutoFocus(): boolean {
+    // 桌面端
+    if (backend.type !== 'web') {
+        // 除了苹果的不知道啥东西,都可以
+        if (['electron', 'tauri'].includes(backend.type)) {
+            return true
+        }
+        return false
+    }
+    // web端
+    else {
+        // 移动端浏览器不自动聚焦
+        if (/Mobile|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+            return false
+        }
+        return true
+    }
+}
+
+/**
+ * 判断是不是机器人
+ * @param id 用户id
+ * @returns
+ */
+export function isRobot(id: number | string): boolean {
+    id = Number(id)
+    if (id >= 4010000000 && id <= 4019999999) return true
+    if (id >= 2854196301 && id <= 2854216399) return true
+    if (id >= 3889000000 && id <= 3889999999) return true
+    if (id === 66600000) return true
+    return false
+}
+
+//#region == use封装 ========================================
+/**
+ * 用来封装一个停留事件的处理, 支持传递额外上下文
+ * 适用于鼠标或触摸事件，停留一段时间后触发
+ * 例如：长按菜单,鼠标悬浮等
+ * @param getPos 从事件里提取坐标的函数
+ * @param continueTime 成功的持续时间
+ * @param hooks 钩子函数 支持成功时,失败时,退出时
+ * @returns {
+ *   acceptStartEvent: (event: T, exArg?: E) => void, // 接受开始事件
+ *   acceptUpdateEvent: (event: T) => void, // 接受更新事件
+ *   acceptEndEvent: (event: T) => void // 接受结束事件
+ * }
+ */
+export function useStayEvent<T extends Event,C>(
+    getPos: (event: T)=>{x: number, y: number} | void,
+    hooks: {
+        onFit?: ((eventData: MenuEventData, ctx: C)=>void)
+              | ((eventData: MenuEventData)=>void)
+              | ((ctx: C)=>void)
+              | (()=>void)
+        onLeave?: ((ctx: C)=>void)
+                | (()=>void)
+        onFail?: ((ctx: C)=>void)
+               | (()=>void)
+    },
+    continueTime: number,
+): {
+    handle: (event: T, ctx?: C | undefined) => void,
+    handleEnd: (event: T) => void,
+} {
+    // 表示结束
+    let end: boolean = true
+    // 表示是否符合条件
+    let fit: boolean = false
+    // 记录开始位置
+    let startPos: {x: number, y: number} | undefined = undefined
+    // settiemout
+    let timeout: number
+    // 开始时事件数据
+    let startEventData: MenuEventData
+    // 额外参数
+    let ctx: C | undefined
+    const handle = (event: T, _ctx?: C|undefined) => {
+        if (end) _acceptStartEvent(event, _ctx)
+        else _acceptUpdateEvent(event)
+    }
+    const handleEnd = (event: T) => {
+        if (end) return
+        _acceptEndEvent(event)
+    }
+    const _acceptStartEvent = (event: T, _ctx?: C|undefined) => {
+        fit = false
+        end = false
+        ctx = _ctx
+        startPos = getPos(event) as {x: number, y: number}
+        if (!startPos) return
+        startEventData = {
+            x: startPos.x,
+            y: startPos.y,
+            target: event.target as HTMLElement,
+        }
+        timeout = setTimeout(() => {
+            fit = true
+            _callFit()
+        }, continueTime) as unknown as number
+    }
+    const _acceptUpdateEvent = (event: T) => {
+        if (end) return
+        const pos = getPos(event)
+        if (!pos) return
+        if (!startPos) return
+        // 位置改变
+        if (Math.abs(pos.x - startPos.x) > 10 ||
+            Math.abs(pos.y - startPos.y) > 10) {
+                _setEnd()
+            }
+    }
+    const _acceptEndEvent = (event: T) => {
+        if (end) return
+        _setEnd()
+        if (getPos(event)) _acceptUpdateEvent(event)
+    }
+    // ==工具函数=====================================
+    const _setEnd = () => {
+        end = true
+        if (fit) _callLeave()
+        else _callFail()
+        // 清除定时器
+        clearTimeout(timeout)
+    }
+    const _callFit = () => {
+        if (hooks.onFit?.length === 0) {
+            (hooks.onFit as () => void)()
+        } else if (hooks.onFit?.length === 1) {
+            let arg
+            if (ctx) arg = ctx
+            else arg = startEventData;
+
+            (hooks.onFit as (arg: MenuEventData|C) => void)(arg)
+        } else if (hooks.onFit?.length === 2) {
+            (hooks.onFit as (eventData: MenuEventData, ctx?: C) => void)(startEventData, ctx)
+        }
+    }
+    const _callLeave = () => {
+        if (hooks.onLeave?.length === 0) {
+            (hooks.onLeave as () => void)()
+        } else if (hooks.onLeave?.length === 1) {
+            (hooks.onLeave as (ctx?: C) => void)(ctx)
+        }
+    }
+    const _callFail = () => {
+        if (hooks.onFail?.length === 0) {
+            (hooks.onFail as () => void)()
+        } else if (hooks.onFail?.length === 1) {
+            (hooks.onFail as (ctx?: C) => void)(ctx)
+        }
+    }
+    return {
+        handle,
+        handleEnd,
+    }
+}
+
+/**
+ * 使用事件监听器
+ * @param target 目标dom
+ * @param event 事件
+ * @param callback 回调
+ */
+export function useEventListener<T extends keyof DocumentEventMap>(
+    target: Document,
+    event: T,
+    callback: (event: DocumentEventMap[T]) => void) {
+    // 如果你想的话，
+    // 也可以用字符串形式的 CSS 选择器来寻找目标 DOM 元素
+    onMounted(() => target.addEventListener(event, callback))
+    onUnmounted(() => target.removeEventListener(event, callback))
+}
+
+let viewportUnitsCache: { vw: ShallowRef<number>, vh: ShallowRef<number> } | undefined
+export function useViewportUnits(): { vw: ShallowRef<number>, vh: ShallowRef<number> } {
+    if (viewportUnitsCache)
+        return viewportUnitsCache
+
+    const vw = shallowRef(window.innerWidth / 100)
+    const vh = shallowRef(window.innerHeight / 100)
+
+    const updateUnits = () => {
+        vw.value = window.innerWidth / 100
+        vh.value = window.innerHeight / 100
+    }
+
+    onMounted(() => {
+        window.addEventListener('resize', updateUnits)
+    })
+
+    onUnmounted(() => {
+        window.removeEventListener('resize', updateUnits)
+    })
+
+    viewportUnitsCache = { vw, vh }
+
+    return { vw, vh }
+}
+
+/**
+ * 添加一个按键监听，支持组合键，注意，不支持多普通键组合，如`a+b`
+ * @param keys 按键
+ * @param callback 回调，返回true则阻断事件传播
+ */
+export function useKeyboard(...args: [string, ...string[], () => boolean | undefined]) {
+    if (args.length > 2) {
+        const cb = args.at(-1) as () => boolean | undefined
+        for (const key of args.slice(0, -1)) {
+            if (typeof key !== 'string') continue
+            useKeyboard(key, cb)
+        }
+        return
+    }
+    // 支持组合键，如 'ctrl+shift+alt+s' 或 'a+b+c'
+    const keyList = args[0].toLowerCase().split('+').map(k => k.trim())
+    const cb = args[1] as () => boolean | undefined
+    const modifierKeys = ['ctrl', 'shift', 'alt', 'meta']
+
+    useEventListener(document, 'keydown', (event) => {
+        let allMatch = true
+
+        for (const key of keyList) {
+            if (modifierKeys.includes(key)) {
+                if (!event[`${key}Key`]) {
+                    allMatch = false
+                    break
+                }
+            }
+            // 普通键
+            else if (event.key.toLowerCase() !== key) {
+                allMatch = false
+                break
+            }
+        }
+
+        // 只在所有键都匹配时触发
+        if (allMatch) {
+            const re = cb()
+            if (re) {
+                event.preventDefault()
+                event.stopPropagation()
+            }
+        }
+    })
+}
+
+//#endregion
+
+//#region == v命令封装 ======================================
+/**
+ * 创建一个右键菜单指令
+ * 用于闭包公用停留事件控制器
+ * @returns
+ */
+function createVMenu(): Directive<HTMLElement, (event: MenuEventData)=>void> {
+    // 右键菜单事件数据类型
+    type Binding = DirectiveBinding<(event: MenuEventData)=>void> & { modifiers: {prevent?: boolean, stop?: boolean} }
+
+    // 右键菜单事件数据类型
+    const {
+        handle: menuTouchHandle,
+        handleEnd: menuTouchEnd,
+    } = useStayEvent(
+        (event: TouchEvent) => {
+            if (event.touches.length > 0) {
+                const touch = event.touches[0]
+                return { x: touch.clientX, y: touch.clientY }
+            }
+            return undefined
+        },
+        {
+            onFit: (data: MenuEventData, binding: Binding) => {
+                // 触发右键菜单事件
+                binding.value(data)
+            }
+        },
+        400,
+    )
+
+    // 创建指令
+    return {
+        mounted( el: HTMLElement, binding: Binding, ) {
+            // 创建变量
+            const prevent = binding.modifiers.prevent || false
+            const stop = binding.modifiers.stop || false
+            const controller = new AbortController()
+            const options = {signal: controller.signal}
+
+            // 修复由于 touch 阻断 click 事件冒泡的问题
+            let touchStartTime = 0
+
+            // 添加监听
+            el.addEventListener('contextmenu', (event) => {
+                if (prevent) event.preventDefault()
+                if (stop) event.stopPropagation()
+                const data: MenuEventData = {
+                    x: event.clientX,
+                    y: event.clientY,
+                    target: event.target as HTMLElement,
+                }
+                binding.value(data)
+            }, options)
+            el.addEventListener('touchstart', (event) => {
+                if (prevent) event.preventDefault()
+                if (stop) event.stopPropagation()
+                menuTouchHandle(event, binding)
+                touchStartTime = Date.now()
+            }, options)
+            el.addEventListener('touchmove', (event) => {
+                if (prevent) event.preventDefault()
+                if (stop) event.stopPropagation()
+                menuTouchHandle(event, binding)
+            }, options)
+            el.addEventListener('touchend', (event) => {
+                if (prevent) event.preventDefault()
+                if (stop) event.stopPropagation()
+                menuTouchEnd(event)
+                // 快速点击则触发点击事件
+                if (Date.now() - touchStartTime < 200)
+                    event.target?.['click']?.()
+            }, options)
+
+            // 绑定控制器
+            ;(el as any)._vMenuController = controller
+        },
+        unmounted(el: HTMLElement) {
+            const controller = (el as any)._vMenuController
+            if (!controller) return
+
+            controller.abort()
+            delete (el as any)._vMenuController
+        },
+    }
+}
+/**
+ * 创建一个右键菜单指令
+ * @example v-menu="(data: MenuEventData) =>  打开菜单函数(data, 其他参数)"
+ */
+export const vMenu: Directive<HTMLElement, (event: MenuEventData)=>void, 'prevent' | 'stop'> = createVMenu()
+/**
+ * 挂在时如果设备支持,自动聚焦输入框
+ */
+export const vAutoFocus: Directive<HTMLInputElement|HTMLTextAreaElement, undefined> = {
+    mounted(el: HTMLInputElement|HTMLTextAreaElement) {
+        // 判断是否支持聚焦
+        if (!shouldAutoFocus()) return
+
+        // 检查元素是否可见
+        const isVisible = () => {
+            const style = window.getComputedStyle(el)
+            return style.display !== 'none' &&
+                   style.visibility !== 'hidden' &&
+                   style.opacity !== '0'
+        }
+
+        if (!isVisible()) return
+
+        el.focus()
+    }
+}
+
+export interface SearchBinding<T extends object> {
+    originList: Iterable<T>
+    isSearch: boolean
+    query: T[]
+    forceUpdate?: number // 强制刷新
+    match: (item: T, query: string) => boolean
+}
+
+/**
+ * 生成一个 Search 指令
+ */
+export function createVSearch<T extends object>(): Directive<HTMLInputElement, SearchBinding<T>> {
+    return {
+        mounted(el, binding: DirectiveBinding<SearchBinding<T>>) {
+            const controller = new AbortController()
+            const queryTxt = ref('')
+
+            el.addEventListener('input', () => {
+                queryTxt.value = el.value.trim()
+            }, { signal: controller.signal })
+
+            const stopWatchEffect = watchEffect(() => {
+                void binding.value.forceUpdate
+                if (!queryTxt.value) {
+                    binding.value.isSearch = false
+                    binding.value.query = []
+                } else {
+                    binding.value.isSearch = true
+                    binding.value.query = shallowReactive(Array.from(binding.value.originList)
+                        .filter(item => binding.value.match(item, queryTxt.value)))
+                }
+            })
+            const stopWatch = watch(() => binding.value.isSearch, (isSearch) => {
+                if (!isSearch) {
+                    binding.value.query = []
+                }
+            })
+            ;(el as any)._vSearchController = controller
+            ;(el as any)._vStopWatch = { stopWatch, stopWatchEffect }
+        },
+        unmounted(el) {
+            const controller = (el as any)._vSearchController
+            const stopWatch = (el as any)._vStopWatch
+            if (controller) {
+                controller.abort()
+                delete (el as any)._vSearchController
+            }
+            if (stopWatch) {
+                (stopWatch.stopWatch as WatchHandle).stop()
+                ;(stopWatch.stopWatchEffect as WatchHandle).stop()
+                delete (el as any)._vStopWatch
+            }
+        }
+    }
+}
+/**
+ * 输入时在制定列表里搜索匹配的项
+ * @example v-search="{
+ *     originList: 制定的列表,
+ *     isSearch: 当前是否在搜索,
+ *     query: 搜索结果列表，
+ * }"
+ * @see createVSearch
+ */
+export const vSearch = createVSearch<any>()
+
+/**
+ * 是否隐藏元素
+ * 如果值为 true，则隐藏元素（通过设置 opacity 为 0）
+ * 如果值为 false，则显示元素（通过清除 opacity）
+ * @example v-hide="true"
+ */
+export const vHide: Directive<HTMLElement, boolean> = {
+    mounted(el: HTMLElement, binding: DirectiveBinding<boolean>) {
+        if (binding.value)
+            el.style.opacity = '0'
+
+        else
+            el.style.opacity = ''
+    },
+    updated(el: HTMLElement, binding: DirectiveBinding<boolean>) {
+        if (binding.value)
+            el.style.opacity = '0'
+
+        else
+            el.style.opacity = ''
+    }
+}
+
+/**
+ * 监听 Esc 键按下事件
+ * 当按下 Esc 键时，执行绑定的函数
+ * @example v-esc="退出函数"
+ */
+export const vEsc: Directive<HTMLElement, () => void> = {
+    mounted(el: HTMLElement, binding: DirectiveBinding<() => void>) {
+        const controller = new AbortController()
+        const options = { signal: controller.signal }
+
+        // 监听键盘事件
+        const keydownHandler = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                event.stopPropagation()
+                binding.value()
+            }
+        }
+        document.addEventListener('keydown', keydownHandler, options)
+        ;(el as any)._vEscController = controller
+    },
+    unmounted(el: HTMLElement) {
+        const controller = (el as any)._vEscController
+
+        if (!controller) return
+
+        controller.abort()
+        delete (el as any)._vEscController
+    }
+}
+
+/**
+ * v-move的选项
+ */
+export interface VMoveOptions<T extends HTMLElement> {
+    beforeHook?: (el: T) => void
+    moveHook?: (el: T, move: number) => void
+    endHook?: (el: T) => void
+    leftLimit?: {
+        value: number,
+        type: 'px' | '%'
+    }
+    rightLimit?: {
+        value: number,
+        type: 'px' | '%'
+    }
+    speedCondition?: {
+        minMove: {
+            value: number,
+            type: 'px' | '%'
+        }
+        minSpeed: number
+    },
+    moveCondition?: {
+        minMove: {
+            value: number,
+            type: 'px' | '%'
+        }
+    }
+}
+
+function createVMove<T extends HTMLElement>(): Directive<T, VMoveOptions<T>>{
+    return {
+    mounted(el: T, binding: DirectiveBinding<VMoveOptions<T>>) {
+        const options = binding.value
+
+        const moveFlag = {
+            _move: 0,
+            get move() {
+                return this._move
+            },
+            set move(value: number) {
+                if (value < -getLimit('left')) value = -getLimit('left')
+                if (value > getLimit('right')) value = getLimit('right')
+                this._move = value
+            },
+            onScroll: 'none' as 'none' | 'touch' | 'wheel',
+            lastTime: null as null | number,
+            speedList: [] as number[],
+            touchLast: null as null | TouchEvent,
+        }
+
+        const getPxValue = (option: { type: 'px' | '%', value: number }) => {
+            if (option.type === 'px') return option.value
+            return el.getBoundingClientRect().width * option.value / 100
+        }
+        const getLimit = (type: 'left' | 'right') => {
+            const option: {type: 'px' | '%', value: number} = options?.[type + 'Limit']
+            if (!option) return 0
+            return getPxValue(option)
+        }
+
+        // 滚轮滑动
+        const chatWheelEvent = (event: WheelEvent) => {
+            const process = (event: WheelEvent) => {
+                // 正在触屏,不处理
+                if (moveFlag.onScroll === 'touch') return false
+                const x = event.deltaX
+                const y = event.deltaY
+                const absX = Math.abs(x)
+                const absY = Math.abs(y)
+                // 斜度过大
+                if (absY !== 0 && absX / absY < 2) return false
+                dispenseMove('wheel', -x / 3)
+                return true
+            }
+            if (!process(event)) return
+            event.stopPropagation()
+            event.preventDefault()
+            // 创建遮罩
+            // 由于在窗口移动中,窗口判定箱也在移动,当指针不再窗口外,事件就断了
+            // 所以要创建一个不会动的全局遮罩来处理
+            wheelMask(process,()=>{
+                dispenseMove('wheel', 0, true)
+            })
+        }
+
+        // 触屏开始
+        const chatMoveStartEvent = (event: TouchEvent) => {
+            if (moveFlag.onScroll === 'wheel') return
+            // 触屏开始时，记录触摸点
+            moveFlag.touchLast = event
+        }
+
+        // 触屏滑动
+        const chatMoveEvent = (event: TouchEvent) => {
+            if (moveFlag.onScroll === 'wheel') return
+            if (!moveFlag.touchLast) return
+            const touch = event.changedTouches[0]
+            const lastTouch = moveFlag.touchLast.changedTouches[0]
+            const deltaX = touch.clientX - lastTouch.clientX
+            const deltaY = touch.clientY - lastTouch.clientY
+            const absX = Math.abs(deltaX)
+            const absY = Math.abs(deltaY)
+            // 斜度过大
+            if (absY !== 0 && absX / absY < 2) return
+            event.stopPropagation()
+            event.preventDefault()
+            // 触屏移动
+            moveFlag.touchLast = event
+            dispenseMove('touch', deltaX)
+        }
+
+        // 触屏滑动结束
+        const chatMoveEndEvent = (event: TouchEvent) => {
+            if (moveFlag.onScroll === 'wheel') return
+            const touch = event.changedTouches[0]
+            const lastTouch = moveFlag.touchLast?.changedTouches[0]
+            if (lastTouch) {
+                const deltaX = touch.clientX - lastTouch.clientX
+                const deltaY = touch.clientY - lastTouch.clientY
+                const absX = Math.abs(deltaX)
+                const absY = Math.abs(deltaY)
+                // 斜度过大
+                if (absY === 0 || absX / absY > 2) {
+                    dispenseMove('touch', deltaX)
+                }
+            }
+            dispenseMove('touch', 0, true)
+            moveFlag.touchLast = null
+        }
+        /**
+         * 分发触屏/滚轮情况
+         */
+        const dispenseMove = (type: 'touch' | 'wheel', value: number, end: boolean = false) => {
+            if (!end && moveFlag.onScroll === 'none') startMove(type, value)
+            if (moveFlag.onScroll === 'none') return
+            if (end) endMove()
+            else keepMove(value)
+        }
+
+        /**
+         * 开始窗口移动
+         */
+        const startMove = (type: 'touch' | 'wheel', value: number) => {
+            // 记录 flag
+            moveFlag.onScroll = type
+            moveFlag.move = value
+            moveFlag.lastTime = Date.now()
+
+            // 执行前置钩子
+            options?.beforeHook?.(el)
+            // 执行移动钩子
+            options?.moveHook?.(el, moveFlag.move)
+        }
+        /**
+         * 保持窗口移动
+         */
+        const keepMove = (value: number) => {
+            // 增加移动值
+            moveFlag.move += value
+            // 计算速度
+            const nowDate = Date.now()
+            if (!moveFlag.lastTime) return
+            const deltaTime = nowDate - moveFlag.lastTime
+            moveFlag.lastTime = nowDate
+            moveFlag.speedList.push(value / deltaTime)
+
+            // 执行移动钩子
+            options?.moveHook?.(el, moveFlag.move)
+        }
+        /**
+         * 结束窗口移动
+         */
+        const endMove = () => {
+            // 保留自己要的数据
+            const move = moveFlag.move
+            const speedList = moveFlag.speedList
+
+            // 移动距离判定
+            if (
+                options?.moveCondition &&
+                Math.abs(move) >= getPxValue(options.moveCondition.minMove)
+            ) {
+                if (move > 0)
+                    el.dispatchEvent(new CustomEvent('v-move-right', { detail: move }))
+                else
+                    el.dispatchEvent(new CustomEvent('v-move-left', { detail: move }))
+            } else
+            // 速度判定
+            if (
+                options?.speedCondition &&
+                Math.abs(move) >= getPxValue(options.speedCondition.minMove)
+            ) {
+                const endSpeedList = speedList.toReversed().slice(0, 10)
+                let endSpeed = 0
+                for (const speed of endSpeedList) {
+                    endSpeed += speed
+                }
+                endSpeed /= endSpeedList.length
+                if (Math.abs(endSpeed) > options.speedCondition.minSpeed) {
+                    if (endSpeed > 0)
+                        el.dispatchEvent(new CustomEvent('v-move-right', { detail: move }))
+                    else
+                        el.dispatchEvent(new CustomEvent('v-move-left', { detail: move }))
+                }
+            }
+
+            // 执行结束钩子
+            binding.value?.endHook?.(el)
+
+            // 重置数据
+            moveFlag.onScroll = 'none'
+            moveFlag.lastTime = 0
+            moveFlag.speedList = []
+            moveFlag.move = 0
+        }
+
+        // 添加监听
+        const controller = new AbortController()
+        const listenerOptions = { signal: controller.signal }
+        el.addEventListener('wheel', chatWheelEvent, { ...listenerOptions, passive: false })
+        el.addEventListener('touchstart', chatMoveStartEvent, listenerOptions)
+        el.addEventListener('touchmove', chatMoveEvent, listenerOptions)
+        el.addEventListener('touchend', chatMoveEndEvent, listenerOptions)
+        ;(el as any)._vMoveController = controller
+
+    },
+    unmounted(el: T) {
+        const controller = (el as any)._vMoveController
+        if (!controller) return
+
+        controller.abort()
+        delete (el as any)._vMoveController
+    }
+}}
+
+/**
+ * 监听元素左滑动/右滑动事件
+ * 当元素被左滑动时，触发 'v-move-left' 事件
+ * 当元素被右滑动时，触发 'v-move-right' 事件
+ * @example <dom v-move="{
+ *     beforeHook: 开始移动前的钩子函数,
+ *     moveHook: 移动中的钩子函数,
+ *     endHook: 结束移动后的钩子函数,
+ *     leftLimit: 左侧移动限制,
+ *     rightLimit: 右侧移动限制,
+ *     speedCondition: 根据速度判定是否触发移动事件的条件,
+ *     moveCondition: 根据移动距离判定是否触发移动事件的条件,
+ * }"
+ * onV-move-left="(move) => 左滑动事件(move)"
+ * onV-move-right="(move) => 右滑动事件(move)"
+ * />
+ */
+export const vMove = createVMove<any>()
+//#endregion
