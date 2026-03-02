@@ -97,12 +97,16 @@
             <BcTab v-if="chat.show.type === 'group'"
                 class="chat-info-tab">
                 <div :name="$t('成员')">
-                    <div class="chat-info-tab-member">
-                        <div class="search-view">
-                            <input :placeholder="$t('搜索 ……')" @input="searchList">
-                        </div>
-                        <div v-for="item in number_cache.length > 0 ? number_cache : chat.info.group_members"
-                            :key="'chatinfomlist-' + item.user_id" class="edit">
+                    <div class="search-view">
+                        <input :placeholder="$t('搜索 ……')" @input="searchList">
+                    </div>
+                    <RecycleScroller
+                        v-slot="{ item }"
+                        class="member-scroller"
+                        :items="number_cache.length > 0 ? number_cache : chat.info.group_members"
+                        :item-size="60"
+                        key-field="user_id">
+                        <div class="member-item edit">
                             <img alt="nk" loading="lazy"
                                 :src="`https://q1.qlogo.cn/g?b=qq&s=0&nk=${item.user_id}`">
                             <div>
@@ -117,7 +121,7 @@
                             <font-awesome-icon v-if="canEditMember(item.role)" :icon="['fas', 'wrench']" @click="moreConfig(item)" />
                             <font-awesome-icon v-else :icon="['fas', 'copy']" @click="moreConfig(item.user_id)" />
                         </div>
-                    </div>
+                    </RecycleScroller>
                 </div>
                 <div :name="$t('公告')">
                     <div class="bulletins">
@@ -127,6 +131,10 @@
                             :data="item"
                             :index="index" />
                     </div>
+                    <div v-if="!chat.info.group_notices || chat.info.group_notices.length === 0"
+                        style="text-align: center; padding: 20px; color: var(--color-text-3);">
+                        {{ $t('这里还没有公告哦~') }}
+                    </div>
                 </div>
                 <div :name="$t('文件')">
                     <div
@@ -135,6 +143,10 @@
                             :key="'file-' + (item.folder_id ?? item.file_id)">
                             <FileBody :chat="chat" :item="item" />
                         </div>
+                    </div>
+                    <div v-if="!chat.info.group_files || chat.info.group_files.length === 0"
+                        style="text-align: center; padding: 20px; color: var(--color-text-3);">
+                        {{ $t('一点文件都没有耶——') }}
                     </div>
                 </div>
                 <div :name="$t('设置')">
@@ -187,7 +199,7 @@
                             type="text"
                             @change="updateMumberTitle($event, showUserConfig)">
                     </div>
-                    <template v-if="showUserConfig.role === 'member'">
+                    <template v-if="(chat.info.me_info.role === 'owner' && showUserConfig.role != 'owner') || (chat.info.me_info.role === 'admin' && showUserConfig.role === 'member')">
                         <header>{{ $t('操作') }}</header>
                         <div class="opt-item">
                             <font-awesome-icon :icon="['fas', 'clipboard-list']" />
@@ -222,11 +234,13 @@
     import FileBody from '@renderer/components/FileBody.vue'
     import OptInfo from './options/OptInfo.vue'
     import BcTab from 'vue3-bcui/packages/bc-tab'
+    import { RecycleScroller } from 'vue-virtual-scroller'
+    import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
 
     import { Connector } from '@renderer/function/connect'
     import { PopInfo, PopType } from '@renderer/function/base'
     import { defineComponent, toRaw } from 'vue'
-    import { getTrueLang } from '@renderer/function/utils/systemUtil'
+    import { delay, getTrueLang } from '@renderer/function/utils/systemUtil'
     import { runtimeData } from '@renderer/function/msg'
     import {
         UserFriendElem,
@@ -236,7 +250,7 @@
 
     export default defineComponent({
         name: 'ViewInfo',
-        components: { BulletinBody, FileBody, OptInfo, BcTab },
+        components: { BulletinBody, FileBody, OptInfo, BcTab, RecycleScroller },
         props: ['tags', 'chat'],
         emits: ['close'],
         data() {
@@ -274,6 +288,28 @@
                                     'setGroupKick',
                                 )
                                 runtimeData.popBoxList.shift()
+                                this.showUserConfig = {}
+                                const popInfo = {
+                                    title: this.$t('操作'),
+                                    html: `<span>${this.$t('正在确认操作……')}</span>`
+                                }
+                                runtimeData.popBoxList.push(popInfo)
+                                // 稍微等一下再刷新成员列表
+                                delay(1000).then(() => {
+                                    Connector.send(
+                                        'get_group_member_list',
+                                        { group_id: runtimeData.chatInfo.show.id, no_cache: true },
+                                        'getGroupMemberList',
+                                    )
+                                    return delay(1000)
+                                }).then(() => {
+                                    Connector.send(
+                                        'get_group_member_list',
+                                        { group_id: runtimeData.chatInfo.show.id, no_cache: true },
+                                        'getGroupMemberList',
+                                    )
+                                    runtimeData.popBoxList.shift()
+                                })
                             },
                         },
                         {
@@ -535,15 +571,110 @@
 <style scoped>
     .search-view {
         background: transparent !important;
-        margin-top: -10px;
+        padding: 0 20px;
+        margin-bottom: 10px;
     }
     .search-view > input {
         background: var(--color-card-1);
         border-radius: 7px;
-        margin: 0 -10px;
         padding: 0 10px;
         height: 35px;
         width: 100%;
         border: 0;
+    }
+
+    div[name="成员"] {
+        overflow: hidden;
+    }
+    /* 虚拟滚动容器样式 */
+    .member-scroller {
+        flex: 1;
+        height: calc(100vh - 330px);
+        min-height: 210px;
+    }
+
+    /* 成员项样式 */
+    .member-item {
+        transition: background 0.3s;
+        margin: 0 20px -10px 20px;
+        align-items: center;
+        border-radius: 7px;
+        cursor: pointer;
+        display: flex;
+        padding: 10px;
+    }
+
+    .member-item:hover {
+        background: var(--color-card-1);
+    }
+
+    .member-item > img {
+        border-radius: 100%;
+        margin-right: 10px;
+        height: 30px;
+        width: 30px;
+    }
+
+    .member-item > div {
+        overflow: hidden;
+        align-items: center;
+        display: flex;
+        flex: 1;
+    }
+
+    .member-item > div > a {
+        color: var(--color-font);
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        max-width: 80%;
+        overflow: hidden;
+        cursor: pointer;
+    }
+
+    .member-item > div > svg {
+        color: var(--color-main);
+        margin-left: 5px;
+        height: 0.8rem;
+    }
+
+    .member-item > span {
+        color: var(--color-font-2);
+        transition: all .2s;
+        opacity: 1;
+    }
+
+    .member-item.edit:hover > span {
+        transform: translateX(-10px);
+        opacity: 0;
+    }
+
+    .member-item > svg {
+        color: var(--color-font-2);
+        transition: all .2s;
+        margin-right: -25px;
+        margin-left: 10px;
+        width: 15px;
+        opacity: 0;
+    }
+
+    .member-item > svg:hover {
+        color: var(--color-main);
+    }
+
+    .member-item.edit:hover > svg {
+        margin-right: 5px;
+        display: block;
+        opacity: 1;
+    }
+</style>
+<style>
+    .tab-body {
+        overflow: hidden !important;
+        flex-direction: column;
+        display: flex;
+    }
+    .tab-body > div {
+        overflow: scroll;
+        flex: 1;
     }
 </style>

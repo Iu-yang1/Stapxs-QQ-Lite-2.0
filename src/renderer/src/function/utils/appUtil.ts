@@ -34,6 +34,9 @@ import {
     shallowReactive,
     ShallowRef,
     shallowRef,
+    Component,
+    DirectiveBinding,
+    Ref,
 } from 'vue'
 import { sendMsgRaw } from './msgUtil'
 import { parseMsg } from '../sender'
@@ -77,6 +80,7 @@ export function scrollToMsg(seqName: string, showAnimation: boolean, showHighlig
 /**
  * 打开链接
  * @param url 链接
+ * @param external 是否外部打开
  */
 export function openLink(url: string, external = false) {
     // 判断是不是 Electron，是的话打开内嵌 iframe
@@ -101,7 +105,7 @@ export function openLink(url: string, external = false) {
                             if (shell) {
                                 shell.openExternal(url)
                             } else {
-                                backend.call('', 'sys:openInBrowser', false, backend.proxyUrl(url))
+                                backend.call('', 'sys:openInBrowser', false, backend.unProxyUrl(url))
                             }
                             runtimeData.popBoxList.shift()
                         },
@@ -121,10 +125,7 @@ export function openLink(url: string, external = false) {
             if (shell) {
                 shell.openExternal(url)
             } else {
-                if(backend.proxy) {
-                    url = decodeURIComponent(url.replace(`http://localhost:${backend.proxy}/proxy?url=`, ''))
-                }
-                backend.call('', 'sys:openInBrowser', false, url)
+                backend.call('', 'sys:openInBrowser', false, backend.unProxyUrl(url))
             }
         }
     } else {
@@ -297,9 +298,8 @@ export function downloadFile(
 * Windows：获取加载系统主题色
 * @param color 颜色
 */
-export function updateWinColor(color: string) {
-    const process = window.electron?.process
-    if (process && process.platform == 'win32') {
+export function updateWinColor(color: string, type: string) {
+    if (type == 'windows') {
         const red = parseInt(color.substr(0, 2), 16)
         const green = parseInt(color.substr(2, 2), 16)
         const blue = parseInt(color.substr(4, 2), 16)
@@ -308,14 +308,18 @@ export function updateWinColor(color: string) {
         const media = window.matchMedia('(prefers-color-scheme: dark)')
         const autodark = option.get('opt_auto_dark')
         const dark = option.get('opt_dark')
+        let min = 0.35
+        let max = 0.9
         if (
             (autodark == true && media.matches) ||
             (autodark != true && dark == true)
         ) {
-            hsl[2] = 0.8
+            min += ( max - min ) / 2
         } else {
-            hsl[2] = 0.3
+            min = 0.35
+            max -= ( max - min ) / 2
         }
+        hsl[2] = min + hsl[2] * (max - min)
         const finalColor = hslToRgb(hsl[0], hsl[1], hsl[2])
         document.documentElement.style.setProperty(
             '--color-main',
@@ -327,7 +331,7 @@ export function updateWinColor(color: string) {
                 finalColor[2] +
                 ')',
         )
-    } else {
+    } else if(type == 'macos') {
         document.documentElement.style.setProperty(
             '--color-main',
             '#' + color.substring(0, 6) + 'CF',
@@ -335,8 +339,13 @@ export function updateWinColor(color: string) {
     }
 }
 export async function loadWinColor() {
+    const process = window.electron?.process
+    let type = 'macos'
+    if (process && process.platform == 'win32') {
+        type = 'windows'
+    }
     // 获取系统主题色
-    updateWinColor(await backend.call(undefined, 'sys:getWinColor', true))
+    updateWinColor(await backend.call(undefined, 'sys:getWinColor', true), type)
 }
 
 /**
@@ -422,7 +431,10 @@ export function createIpc() {
         // 去消息列表内寻找，去除新消息标记
         const item = runtimeData.baseOnMsgList.get(info.id)
         if(item) {
-            item.new_msg = false
+            if(item.new_msg) {
+                item.new_msg = false
+                runtimeData.newMsgCount--
+            }
             item.highlight = undefined
             runtimeData.baseOnMsgList.set(Number(info.id), item)
         }
@@ -480,9 +492,17 @@ export async function loadMobile() {
         backend.addListener('Onebot', 'onebot:event', (data) => {
             const msg = JSON.parse(data.data)
             switch(data.type) {
-                case 'onopen': Connector.onopen(login.address, login.token); break
+                case 'onopen': {
+                    login.creating = false
+                    Connector.onopen(login.address, login.token)
+                    break
+                }
                 case 'onmessage': Connector.onmessage(data.data); break
-                case 'onclose': Connector.onclose(msg.code, msg.message, login.address, login.token); break
+                case 'onclose': {
+                    login.creating = false
+                    Connector.onclose(msg.code, msg.message, login.address, login.token)
+                    break
+                }
                 case 'onerror': {
                     login.creating = false
                     popInfo.add(PopType.ERR, $t('连接失败') + ': ' + msg.type, false);
@@ -541,7 +561,10 @@ export async function loadMobile() {
                     // 去消息列表内寻找，去除新消息标记
                     const item = runtimeData.baseOnMsgList.get(Number(notification.extra.userId))
                     if(item) {
-                        item.new_msg = false
+                        if(item.new_msg) {
+                            item.new_msg = false
+                            runtimeData.newMsgCount--
+                        }
                         item.highlight = undefined
                         runtimeData.baseOnMsgList.set(Number(notification.extra.userId), item)
                     }
@@ -619,6 +642,8 @@ import { ActionType, LocalNotificationSchema } from '@capacitor/local-notificati
 import { backend } from '@renderer/runtime/backend'
 import { NoticeBodyV3 } from '../elements/system'
 import { wheelMask } from '../input'
+import { addTooltip, TooltipController } from '../tooltip'
+import { VueCompData } from '../elements/vueComp'
 // import windowsCss from '@renderer/assets/css/append/mobile/append_windows.css?raw'
 /**
 * 装载补充样式
@@ -675,6 +700,23 @@ export async function loadAppendStyle() {
             logger.info('UI 2.0 附加样式加载完成')
         })
     }
+
+    if(option.get('chat_more_blur')) {
+        import('@renderer/assets/css/append/append_full_vibrancy.css').then(() => {
+                logger.info('完全透明 UI 附加样式加载完成')
+            })
+    }
+
+    // napcat 插件模式附加样式
+    if(import.meta.env.VITE_NAPCAT) {
+        import('@renderer/assets/css/append/append_full_vibrancy.css').then(() => {
+                logger.info('完全透明 UI 附加样式加载完成')
+            })
+        import('@renderer/assets/css/append/append_napcat.css').then(() => {
+                logger.info('napcat 插件模式附加样式加载完成')
+            })
+    }
+
     // 透明 UI 附加样式
     let subVersion = backend.release?.split(' ')?.[1]?.split('.') as any
     subVersion = subVersion ? Number(subVersion[2]) : 0
@@ -829,6 +871,77 @@ function showReleaseLog(data: any, isUpdated: boolean) {
               ]: buttonGoUpdate,
     }
     runtimeData.popBoxList.push(popInfo)
+}
+
+/**
+ * 获取并展示最近5条更新记录
+ */
+export function showReleaseHistory() {
+    const { $t } = app.config.globalProperties
+    const repoName = import.meta.env.VITE_APP_REPO_NAME
+    const packageUrl = `https://api.github.com/repos/${repoName}/releases?per_page=5`
+
+    fetch(packageUrl).then((response) => {
+        if (response.ok) {
+            response.json().then((dataList: any[]) => {
+                // 解析最近5条更新记录
+                const releases = dataList.map((data) => {
+                    let msg = data.body
+                    const title = msg.split('\r\n')[0].substring(1)
+                    const start = msg.indexOf('## 更新内容\r\n')
+                    if (start != -1) {
+                        msg = msg.substring(start + 9)
+                        const end = msg.indexOf('##')
+                        if (end != -1) {
+                            msg = msg.substring(0, end)
+                        }
+                    }
+                    msg = title + '\r\n' + msg
+
+                    return {
+                        version: data.tag_name.substring(1),
+                        date: data.published_at,
+                        user: {
+                            name: data.author.login,
+                            avatar: data.author.avatar_url,
+                            url: data.author.html_url,
+                        },
+                        message: msg,
+                        html_url: data.html_url,
+                    }
+                })
+
+                const popInfo = {
+                    title: $t('更新历史'),
+                    template: markRaw(UpdatePan),
+                    templateValue: toRaw({ releases }),
+                    full: true,
+                    button: [
+                        {
+                            text: $t('关闭'),
+                            master: true,
+                            fun: () => {
+                                runtimeData.popBoxList.shift()
+                            },
+                        },
+                    ],
+                }
+                runtimeData.popBoxList.push(popInfo)
+            })
+        } else {
+            new PopInfo().add(
+                PopType.ERR,
+                $t('获取更新历史失败'),
+                false,
+            )
+        }
+    }).catch(() => {
+        new PopInfo().add(
+            PopType.ERR,
+            $t('获取更新历史失败'),
+            false,
+        )
+    })
 }
 
 /**
@@ -1383,6 +1496,49 @@ export function useKeyboard(...args: [string, ...string[], () => boolean | undef
     })
 }
 
+
+function localStorageGetItem(key: string): string | null {
+    if (backend.type === 'electron') {
+        return backend.callSync('opt:get', key)
+    } else {
+        // eslint-disable-next-line no-restricted-globals
+        return localStorage.getItem(key)
+    }
+}
+
+function localStorageSetItem(key: string, value: string): void {
+    if (backend.type === 'electron') {
+        backend.callSync('opt:store', { key, value })
+    } else {
+        // eslint-disable-next-line no-restricted-globals
+        localStorage.setItem(key, value)
+    }
+}
+
+/**
+ * 使用 localStorage
+ * @param key 保存的键值
+ * @param defaultValue 默认值
+ * @returns
+ */
+export function useLocalStorage<T>(key: string, defaultValue: T): Ref<T> {
+    const parser = (data: string) => {
+        return JSON.parse(data).value as T
+    }
+    const serializer = (data: T) => {
+        return JSON.stringify({ value: data })
+    }
+    const storageData = localStorageGetItem(key)
+    const data = ref<T>(storageData ? parser(storageData) : defaultValue)
+    watch(
+        data,
+        (newValue) => {
+            localStorageSetItem(key, serializer(newValue))
+        },
+        { deep: true },
+    )
+    return data as Ref<T>
+}
 //#endregion
 
 //#region == v命令封装 ======================================
@@ -1853,6 +2009,47 @@ function createVMove<T extends HTMLElement>(): Directive<T, VMoveOptions<T>>{
     }
 }}
 
+function createVLongHover(): Directive<HTMLElement, undefined> {
+    const {
+        handle: userHoverHandle,
+        handleEnd: userHoverEnd,
+    } = useStayEvent((event: MouseEvent) => {
+        return {x: event.clientX, y: event.clientY,}
+    },{
+        onFit: (eventData, ctx: HTMLElement)=>{
+            ctx.dispatchEvent(new CustomEvent('v-long-hover', { detail: eventData }))
+        },
+        onLeave: (ctx: HTMLElement)=>{
+            ctx.dispatchEvent(new CustomEvent('v-long-hover-end'))
+        }
+    }, 495
+    )
+    return {
+        mounted(el: HTMLElement) {
+            const controller = new AbortController()
+            const options = { signal: controller.signal }
+
+            el.addEventListener('mouseenter', (event) => {
+                userHoverHandle(event, el)
+            }, options)
+            el.addEventListener('mousemove', (event) => {
+                userHoverHandle(event, el)
+            }, options)
+            el.addEventListener('mouseleave', (event) => {
+                userHoverEnd(event)
+            }, options)
+            ;(el as any)._vLongHoverController = controller
+        },
+        unmounted(el: HTMLElement) {
+            const controller = (el as any)._vLongHoverController
+            if (!controller) return
+
+            controller.abort()
+            delete (el as any)._vLongHoverController
+        }
+    }
+}
+
 /**
  * 监听元素左滑动/右滑动事件
  * 当元素被左滑动时，触发 'v-move-left' 事件
@@ -1871,4 +2068,83 @@ function createVMove<T extends HTMLElement>(): Directive<T, VMoveOptions<T>>{
  * />
  */
 export const vMove = createVMove<any>()
+
+/**
+ * 监听元素长时间悬停事件
+ * 当元素被鼠标悬停超过一定时间后，触发 'v-long-hover' 事件
+ * 当鼠标移出元素时，触发 'v-long-hover-end' 事件
+ * @example <dom v-long-hover
+ * onV-long-hover="(eventData) => 长悬停事件(eventData)"
+ * onV-long-hover-end="() => 长悬停结束事件()"
+ * />
+ */
+export const vLongHover = createVLongHover()
+
+type VTooltipBinding<T extends Component> =
+    | T
+    | VueCompData<T>
+    | (() => T | VueCompData<T> )
+    | ((eventData: {x: number, y: number}) => T | VueCompData<T> )
+
+function resolveBinding<T extends Component>(binding: VTooltipBinding<T>, eventData: {x: number, y: number}): VueCompData<T> {
+    if (typeof binding === 'function') {
+        // eslint-disable-next-line multiline-ternary
+        const result = binding.length === 0
+            // eslint-disable-next-line multiline-ternary
+            ? (binding as () => T | VueCompData<T>)()
+            : (binding as (eventData: {x: number, y: number}) => T | VueCompData<T>)(eventData)
+        if ('comp' in result) return result
+        return { comp: result } as VueCompData<T>
+    } else if ('comp' in binding) {
+        return binding
+    } else {
+        return { comp: binding, props: {} } as VueCompData<T>
+    }
+}
+
+/**
+ * 监听元素长时间悬停事件以显示提示工具
+ * 当元素被鼠标悬停超过一定时间后，显示提示工具
+ * 当鼠标移出元素时，关闭提示工具
+ * @modifiers debug - 调试模式，启用后悬停结束时不会关闭提示工具
+ * @example <dom v-tooltip="{
+ *     comp: 提示组件,
+ *     props: 传递给提示组件的属性,
+ *     model: 传递给提示组件的 v-model 数据,
+ *     emit: 传递给提示组件的事件,
+ * }" />
+ */
+export const vTooltip = {
+    mounted<T extends Component>(el: HTMLElement, binding: DirectiveBinding<VTooltipBinding<T>> & { modifiers: { debug?: boolean } }) {
+        const controller = new AbortController()
+        const options = { signal: controller.signal }
+        ;(vLongHover as any).mounted(el)
+        ;(el as any)._vTooltipController = controller
+
+        let tooltip: TooltipController | undefined
+
+        el.addEventListener('v-long-hover', (ev: Event) => {
+            const event = ev as CustomEvent<{ x: number, y: number }>
+            const detail = event.detail
+            const compData = resolveBinding(binding.value, detail)
+            tooltip = addTooltip(compData, { x: detail.x, y: detail.y })
+        }, options)
+
+        el.addEventListener('v-long-hover-end', () => {
+            if(binding.modifiers?.debug) return
+            tooltip?.close()
+            tooltip = undefined
+        }, options)
+    },
+
+    unmounted(el: HTMLElement) {
+        (vLongHover as any).unmounted(el)
+        const controller = (el as any)._vTooltipController
+        if (!controller) return
+
+        controller.abort()
+        delete (el as any)._vTooltipController
+    }
+}
+
 //#endregion

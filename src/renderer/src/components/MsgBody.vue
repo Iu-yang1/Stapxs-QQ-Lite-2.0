@@ -12,57 +12,53 @@
 <template>
     <div :id="'chat-' + data.message_id"
         ref="msgMain"
+        v-menu.prevent="event => $emit('showMenu', event, data)"
         :class="'message' +
             (type ? ' ' + type : '') +
             (data.revoke ? ' revoke' : '') +
             (isMe ? ' me' : '') +
-            (selected ? ' selected' : '')"
+            (selected ? ' selected' : '') +
+            (runtimeData.sysConfig.opt_ind_message === true ? ' right' : '')"
         :data-raw="getMsgRawTxt(data)"
         :data-sender="data.sender.user_id"
         :data-time="data.time"
         @mouseleave="hiddenUserInfo">
-        <img v-show="!isMe || type == 'merge'"
-            v-menu.prevent="event => $emit('showMenu', event, data)"
+        <img v-menu.prevent="event => $emit('showMenu', event, data)"
+            v-user-tooltip="() => getUserById(data.sender.user_id)"
             name="avatar"
             :src="'https://q1.qlogo.cn/g?b=qq&s=0&nk=' + data.sender.user_id"
             :alt="data.sender.card ? data.sender.card : data.sender.nickname"
-            @mouseenter="userInfoHoverHandle($event, getUserById(data.sender.user_id))"
-            @mousemove="userInfoHoverHandle($event, getUserById(data.sender.user_id))"
-            @mouseleave="userInfoHoverEnd($event)"
             @dblclick="sendPoke">
-        <div v-if="isMe && type != 'merge'"
-            class="message-space" />
         <div v-if="data.fake_msg == true"
             :class="'sending left' + (isMe ? ' me' : '')">
             <font-awesome-icon :icon="['fas', 'spinner']" />
         </div>
         <div :class="msgBodyClass">
-            <template v-if="runtimeData.chatInfo.show.type == 'group' && !isMe">
-                <span v-if="senderInfo && isRobot(senderInfo.user_id)" class="robot">{{ $t('机器人') }}</span>
-                <span v-if="senderInfo?.role == 'owner'" class="owner">{{ $t('群主') }}</span>
-                <span v-else-if="senderInfo?.role == 'admin'" class="admin">{{ $t('管理员') }}</span>
-                <span v-if="senderInfo?.title && senderInfo?.title != ''">{{ senderInfo?.title.replace(/[\u202A-\u202E\u2066-\u2069]/g, '') }}</span>
-            </template>
-            <a v-if="data.sender.card || data.sender.nickname"
-                v-show="!isMe || type == 'merge'">
-                {{ data.sender.card ? data.sender.card : data.sender.nickname }}
-            </a>
-            <a v-else v-show="!isMe || type == 'merge'">
-                {{ isMe ? runtimeData.loginInfo.nickname : runtimeData.chatInfo.show.name }}
-            </a>
-            <a v-if="selected" class="time">
-                {{ Intl.DateTimeFormat(trueLang, {
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: 'numeric',
-                    minute: 'numeric',
-                    second: 'numeric',
-                }).format(getViewTime(getViewTime(data.time))) }}
-            </a>
-            <div
-                v-menu.prevent="event => $emit('showMenu', event, data)"
-                v-move="moveOptions"
+            <header>
+                <template v-if="runtimeData.chatInfo.show.type == 'group'">
+                    <span v-if="senderInfo && isRobot(senderInfo.user_id)" class="robot">{{ $t('机器人') }}</span>
+                    <span v-if="senderInfo?.role == 'owner'" class="owner">{{ $t('群主') }}</span>
+                    <span v-else-if="senderInfo?.role == 'admin'" class="admin">{{ $t('管理员') }}</span>
+                    <span v-if="senderInfo?.title && senderInfo?.title != ''">{{ senderInfo?.title.replace(/[\u202A-\u202E\u2066-\u2069]/g, '') }}</span>
+                </template>
+                <a v-if="data.sender.card || data.sender.nickname">
+                    {{ data.sender.card ? data.sender.card : data.sender.nickname }}
+                </a>
+                <a v-else>
+                    {{ isMe ? runtimeData.loginInfo.nickname : runtimeData.chatInfo.show.name }}
+                </a>
+                <a v-if="selected" class="time">
+                    {{ Intl.DateTimeFormat(trueLang, {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: 'numeric',
+                        minute: 'numeric',
+                        second: 'numeric',
+                    }).format(getViewTime(getViewTime(data.time))) }}
+                </a>
+            </header>
+            <div v-move="moveOptions"
                 @v-move-left.prevent="$emit('leftMove', data)"
                 @v-move-right.prevent="$emit('rightMove', data)">
                 <!-- 消息体 -->
@@ -71,9 +67,8 @@
                 </template>
                 <!-- 超级表情 -->
                 <template v-else-if="isSuperFaceMsg()">
-                    <div class="msg-img face alone"
-                        style="--width: 35vh">
-                        <Lottie v-once
+                    <div class="msg-img face lottie-face alone">
+                        <LazyLottie
                             :animation-link="Emoji.get(Number(data.message[0].id))!.superValue!"
                             :title="Emoji.get(Number(data.message[0].id))!.description" />
                     </div>
@@ -107,7 +102,7 @@
                         <img v-else-if="item.type == 'image'"
                             :title="(!item.summary || item.summary == '') ? $t('预览图片') : item.summary"
                             :alt="$t('图片')"
-                            :class=" imgStyle(data.message.length, index, item.asface)"
+                            :class=" imgStyle(data.message.length, index, isFace(item))"
                             :src="backend.proxyUrl(item.url)"
                             @load="imageLoaded"
                             @error="imgLoadFail"
@@ -121,11 +116,9 @@
                         </span>
                         <div v-else-if="item.type == 'at'"
                             :class="getAtClass(item.qq)">
-                            <a :data-id="item.qq"
-                                :data-group="data.group_id"
-                                @mouseenter="userInfoHoverHandle($event, getAtMember(item.qq))"
-                                @mousemove="userInfoHoverHandle($event, getAtMember(item.qq))"
-                                @mouseleave="userInfoHoverEnd($event)">
+                            <a v-user-tooltip="() => getAtMember(item.qq)"
+                                :data-id="item.qq"
+                                :data-group="data.group_id">
                                 {{ getAtName(item) }}
                             </a>
                         </div>
@@ -288,7 +281,9 @@
                     </template>
                     <template v-else>
                         <!-- 特殊 URL 的预览 -->
-                        <div v-if="pageViewInfo.type == 'bilibili'" class="link-view-bilibili">
+                        <div v-if="pageViewInfo.type == 'bilibili'"
+                            class="link-view-bilibili"
+                            @click="openLink(pageViewInfo.url)">
                             <div class="user">
                                 <img :src="backend.proxyUrl(pageViewInfo.data.owner.face)">
                                 <span>{{ pageViewInfo.data.owner.name }}</span>
@@ -382,11 +377,11 @@ import {
     isRobot,
     openLink,
     sendStatEvent,
-    useStayEvent,
 	vMenu,
 	vMove,
 	VMoveOptions,
 } from '@renderer/function/utils/appUtil'
+import { vUserTooltip } from '@renderer/function/tooltip'
 import {
     getSizeFromBytes,
     getTrueLang,
@@ -396,8 +391,7 @@ import { MenuEventData, MergeStackData } from '@renderer/function/elements/infor
 import { backend } from '@renderer/runtime/backend'
 import Emoji from '@renderer/function/model/emoji'
 import EmojiFace from './EmojiFace.vue'
-import { Vue3Lottie as Lottie } from 'vue3-lottie'
-import { UserInfoPan } from './UserInfoPan.vue'
+import LazyLottie from './LazyLottie.vue'
 import { Img } from '@renderer/function/model/img'
 
 type Msg = any
@@ -407,12 +401,10 @@ const {
     data,
     selected,
     type,
-    userInfoPan,
 } = defineProps<{
     data: any
     selected?: boolean
     type?: string
-    userInfoPan?: UserInfoPan
     imageListHeader?: Img | undefined
 }>()
 
@@ -458,26 +450,6 @@ const moveOptions: VMoveOptions<HTMLDivElement> = {
 
 //#endregion
 
-//#region == 长按/覆盖监视器 =========================================================
-const {
-    handle: userInfoHoverHandle,
-    handleEnd: userInfoHoverEnd,
-} = useStayEvent(
-    (event: MouseEvent) => {
-        return {
-            x: event.clientX,
-            y: event.clientY,
-        }
-    },
-    {onFit: (eventData, ctx: number | IUser) => {
-        userInfoPan?.open(ctx, eventData.x, eventData.y)
-    },
-    onLeave: () => {
-        userInfoPan?.close()
-    }}, 495
-)
-//#endregion
-
 //#region == 工具函数 ================================================================
 function getAtMember(id: number): IUser | number {
     const re = getUserById(id) ?? id
@@ -501,9 +473,11 @@ function getUserById(id: number): IUser | undefined {
     export default defineComponent({
         name: 'MsgBody',
         inject: ['viewer'],
-        props: ['data', 'type', 'selected'],
+        props: ['data', 'type', 'selected', 'imageListHeader'],
+        emits: ['scrollToMsg', 'imageLoaded', 'sendPoke'],
         data() {
             return {
+                Emoji,
                 backend,
                 md: markdownit({ breaks: true }),
                 isMe: false,
@@ -561,6 +535,9 @@ function getUserById(id: number): IUser | undefined {
             }
             if(this.isSuperFaceMsg()) {
                 this.msgBodyClass += ' super-face'
+            }
+            if(runtimeData.sysConfig.opt_ind_message === true) {
+                this.msgBodyClass += ' right'
             }
         },
         methods: {
@@ -667,8 +644,20 @@ function getUserById(id: number): IUser | undefined {
                 const vh = document.documentElement.clientHeight || document.body.clientHeight
                 const imgHeight = img.naturalHeight || img.height
                 let imgWidth = img.naturalWidth || img.width
-                if (imgHeight > vh * 0.35)
-                    imgWidth = (imgWidth * (vh * 0.35)) / imgHeight
+
+                // 计算长宽比，检测是否为长图
+                const aspectRatio = imgHeight / imgWidth
+
+                // 常见的手机里最大的可能一般是 20:9
+                // 避免截图被判为长图，这里设置为它
+                if (aspectRatio > 2.5) {
+                    img.classList.add('long-img')
+                } else {
+                    // 普通图片的处理逻辑保持不变
+                    if (imgHeight > vh * 0.35)
+                        imgWidth = (imgWidth * (vh * 0.35)) / imgHeight
+                }
+
                 img.style.setProperty('--width', `${imgWidth}px`)
                 this.$emit('imageLoaded', img.offsetHeight)
             },
@@ -1219,8 +1208,11 @@ function getUserById(id: number): IUser | undefined {
             isFace(item: any) {
                 if (item.asface) return true
                 // 这是神马鬼玩意？一个驼峰，一个下划线，真是一个协议段一个协议啊
+                // QQ 一个动画表情怎么这么多种类型啊，服了
                 else if (item.subType == 7) return true
+                else if (item.subType == 1) return true
                 else if (item.sub_type == 7) return true
+                else if (item.sub_type == 1) return true
                 return false
             },
             //#endregion
@@ -1285,6 +1277,7 @@ function getUserById(id: number): IUser | undefined {
 
     .link-view-bilibili {
         flex-direction: column;
+        cursor: pointer;
         width: 100%;
     }
     .link-view-bilibili > div.user {
@@ -1310,7 +1303,9 @@ function getUserById(id: number): IUser | undefined {
     .link-view-bilibili > img {
         margin-bottom: 10px;
         max-width: 100% !important;
+        max-height: 30vh !important;
         width: fit-content;
+        object-fit: contain;
     }
     .link-view-bilibili > a {
         color: var(--color-font-2) !important;

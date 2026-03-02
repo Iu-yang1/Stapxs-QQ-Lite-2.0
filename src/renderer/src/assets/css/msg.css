@@ -14,6 +14,12 @@
     font-size: 1rem;
     flex-wrap: wrap;
 }
+.message.me {
+    flex-direction: row-reverse;
+}
+.message.me.right {
+    flex-direction: row-reverse !important;
+}
 .message.selected {
     background: #0000001d;
 }
@@ -29,6 +35,12 @@
     height: 35px;
     border-radius: 7px;
     margin: 10px 15px 0 0;
+}
+.message.me > img {
+    margin: 10px 0 0 15px;
+}
+.message.me.right > img {
+    margin: 10px 0 0 15px !important;
 }
 .message > div.sending {
     width: 13px;
@@ -53,6 +65,8 @@
 
 .message-body {
     color: var(--color-font);
+    display: flex;
+    flex-direction: column;
     max-width: 60%;
 }
 .message-body.me {
@@ -71,8 +85,15 @@
 .message-body a {
     color: var(--color-font);
 }
+.message-body.me,
+.message-body.me.right {
+    align-items: end;
+}
 .message-body.me a {
     color: var(--color-font-r);
+}
+.message-body.me > header > a {
+    color: var(--color-font);
 }
 .message-body a:link {
     text-decoration: underline;
@@ -89,30 +110,34 @@
 .message-body.me a:link::before {
     text-shadow: 0 0 0 var(--color-font-1-r);
 }
-.message-body > span {
+.message-body > header {
+    flex-wrap: wrap;
+    display: flex;
+}
+.message-body > header > span {
     margin-right: 3px;
     font-size: 0.7rem;
-    background: var(--color-main);
+    background: var(--color-font);
     color: var(--color-font-r);
     border-radius: 10px;
     padding: 1px 4px;
 }
-.message-body > span.owner {
+.message-body > header > span.owner {
     background: var(--color-yellow);
 }
-.message-body > span.admin {
+.message-body > header > span.admin {
     background: var(--color-green);
 }
-.message-body > span.robot {
+.message-body > header > span.robot {
     background: var(--color-blue);
 }
-.message-body > a {
+.message-body > header > a {
     color: var(--color-font-1);
     display: inline-block;
-    font-size: 0.9rem;
+    font-size: 0.8rem;
     margin: 0 5px;
 }
-.message-body > a.time {
+.message-body > header > a.time {
     color: var(--color-font-2);
     font-size: 0.75rem;
     opacity: 0.7;
@@ -133,10 +158,6 @@
 .message-body.super-face > div > div {
     padding: 20px 10px;
     border: 0;
-}
-
-.message-space {
-    flex: 1;
 }
 
 .message-mine {
@@ -219,6 +240,35 @@
 }
 .msg-img.face {
 	max-width: calc(var(--width) / 2 + 20px);
+}
+.msg-img.face.lottie-face {
+    max-width: 30vh
+}
+/* 长图优化样式 */
+div:has(> .msg-img.long-img)::after {
+    content: '长图';
+    background: rgba(var(--color-card-2-rgb), 0.5);
+    width: calc(100% - 10px);
+    display: block;
+    position: sticky;
+    margin-bottom: -20px;
+    transform: translateY(-100%);
+    text-align: center;
+    padding: 5px;
+    border-radius: 7px;
+    font-size: 0.65rem;
+    backdrop-filter: blur(20px);
+}
+.msg-img.long-img {
+    max-height: 40vh;
+    width: 20vw;
+    height: 40vh;
+    object-fit: cover;
+    object-position: top center;
+}
+.msg-img.long-img.alone {
+    max-width: calc(100% + 20px);
+    margin: -10px;
 }
 
 .msg-face {
@@ -535,7 +585,7 @@ span.user-title.robot {
 
 .msg-raw-forward {
     cursor: pointer;
-    width: var(--merge-forward-width);
+    width: 17rem;
 }
 .msg-raw-forward > span {
     font-weight: bold;
@@ -607,7 +657,6 @@ span.user-title.robot {
     z-index: 1;
 }
 .note-nomsg > hr {
-    border-style: inset !important;
     border: 0 !important;
     border-bottom: 1px solid var(--color-main) !important;
     opacity: 0.5;
@@ -676,11 +725,17 @@ span.user-title.robot {
 
 @media (max-width: 992px) {
     /* 消息体 */
+    .message-body.me {
+        align-items: start;
+    }
+    .message.me {
+        flex-direction: row;
+    }
     .message > img {
         display: unset !important;
     }
-    .message-space {
-        display: none;
+    .message.me > img {
+        margin: 10px 15px 0 0;
     }
     .message-body {
         max-width: calc(100% - 50px);
@@ -700,5 +755,11 @@ span.user-title.robot {
         animation: rotate 1.5s linear infinite;
         color: var(--color-font-2);
         width: 0.75rem;
+    }
+}
+
+@media (max-width: 500px) {
+    .msg-img.face.lottie-face {
+        max-width: 40vw;
     }
 }

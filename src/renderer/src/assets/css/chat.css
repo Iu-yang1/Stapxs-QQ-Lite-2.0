@@ -9,7 +9,7 @@ input {
     background-color: var(--color-card);
     background-repeat: no-repeat;
     background-position: center;
-    background-size: auto 100%;
+    background-size: cover;
 
     color: var(--color-font);
     flex-direction: column;
@@ -66,6 +66,11 @@ input {
     display: none;
     height: 20px;
     width: 20px;
+}
+.chat-pan > div.info > svg.back {
+    background: rgba(var(--color-card-2-rgb), 0.8);
+    display: block !important;
+    color: var(--color-font);
 }
 .chat-pan > div.info > img {
     border: 2px solid var(--color-card-2);
@@ -163,6 +168,7 @@ input {
     background: transparent;
 }
 .chat-pan > div.more > div:nth-child(2) {
+    align-items: end;
     display: flex;
     padding: 20px;
 }
@@ -183,8 +189,8 @@ input {
     width: 20px;
 }
 .chat-pan > div.more > div:nth-child(2) > div:nth-child(2) {
+    align-items: end;
     display: flex;
-    height: 50px;
     flex: 1;
 }
 .chat-pan > div.more > div:nth-child(2) > div > form {
@@ -192,22 +198,23 @@ input {
 }
 .chat-pan > div.more > div:nth-child(2) > div > form > input {
     padding-top: 0 !important;
-    margin-top: 0 !important;
-    height: 100% !important;
+    height: 50px !important;
+    margin: 0 !important;
 }
 .chat-pan > div.more > div:nth-child(2) > div > form > input,
 .chat-pan > div.more > div:nth-child(2) > div > form > textarea {
-    padding: 14px 20px 0 20px;
+    width: calc(100% - 40px);
     color: var(--color-font);
     background: transparent;
-    line-height: 1.1rem;
     border-radius: 7px;
     font-size: 0.85rem;
-    max-height: 50px;
-    margin-top: 5px;
-    height: 26px;
+    line-height: 20px;
+    max-height: 40vh;
+    min-height: 20px;
+    padding: 0 20px;
+    margin: 10px 0;
+    height: 20px;
     resize: none;
-    width: 100%;
     border: 0;
 }
 .chat-pan > div.more > div:nth-child(2) > div > form > input:disabled,
@@ -221,10 +228,10 @@ input {
 }
 .chat-pan > div.more > div:nth-child(2) > div > div {
     border-radius: 7px;
-    min-height: 40px;
-    min-width: 40px;
     cursor: pointer;
+    height: 40px;
     margin: 5px;
+    width: 40px;
 }
 .chat-pan > div.more > div:nth-child(2) > div > div:hover {
     background: var(--color-card-2);
@@ -233,7 +240,7 @@ input {
     color: var(--color-font-1);
     width: 20px;
     height: 20px;
-    margin: 11px;
+    margin: 10px;
 }
 .chat-pan > div.loading {
     background: var(--color-card-1);
@@ -488,64 +495,56 @@ input {
     display: flex;
 }
 
+.custom-face-tooltip,
 .member-info {
-    position: absolute;
-    top: 0px;
-    left: 0px;
-    height: calc(100% - var(--safe-area-bottom));
-    width: 100%;
-    z-index: 10;
+    width: fit-content;
     pointer-events: none;
-}
-.member-info span,
-.member-info a {
-    color: var(--color-font);
-}
-.member-info > div {
-    pointer-events: none;
-}
-.member-info > div:first-child {
+
     transform: translate(-20px, calc(-100% - 0.8rem));
     box-shadow: 0 0 5px var(--color-shader);
     background: rgba(var(--color-card-2-rgb), 0.75);
     border: 1px solid var(--color-card-2);
     backdrop-filter: blur(15px);
     padding: 10px 20px 10px 10px;
-    width: fit-content;
     overflow: hidden;
     max-width: 55%;
-
+    max-height: calc(100% - var(--safe-area-bottom));
 }
-.member-info > div:first-child > div:nth-child(1) {
+.member-info span,
+.member-info a {
+    color: var(--color-font);
+}
+
+.member-info > div:nth-child(1) {
     display: flex;
 }
-.member-info > div:first-child > div:nth-child(1) > img {
+.member-info > div:nth-child(1) > img {
     outline: 2px solid var(--color-main);
     border-radius: 7px;
     height: 60px;
     width: 60px;
 }
-.member-info > div:first-child > div:nth-child(1) > div {
+.member-info > div:nth-child(1) > div {
     margin-left: 20px;
     overflow: hidden;
     flex: 1;
 }
-.member-info > div:first-child > div:nth-child(1) > div > span {
+.member-info > div:nth-child(1) > div > span {
     color: var(--color-font-1);
     font-size: 0.9rem;
     white-space: nowrap;
 }
-.member-info > div:first-child > div:nth-child(1) > div > span[name='id'] {
+.member-info > div:nth-child(1) > div > span[name='id'] {
     font-size: 0.8rem;
     display: block;
     opacity: 0.7
 }
-.member-info > div:first-child > div:nth-child(1) > div > div {
+.member-info > div:nth-child(1) > div > div {
     margin-bottom: 5px;
     flex-wrap: wrap;
     display: flex;
 }
-.member-info > div:first-child > div:nth-child(1) > div > div > a {
+.member-info > div:nth-child(1) > div > div > a {
     text-overflow: ellipsis;
     width: 100%;
     overflow: hidden;
@@ -555,23 +554,38 @@ input {
     font-size: 1rem;
     display: block;
 }
-.member-info > div:first-child > div:nth-child(1) > div > div > div {
+.member-info > div:nth-child(1) > div > div > div {
     margin-top: 4px;
 }
 /* 群成员下边区域 */
-.member-info > div:first-child > div:nth-child(2).member {
+.member-info > div:nth-child(2).member {
     display: flex;
     margin-top: 10px;
     align-items: center;
 }
-.member-info > div:first-child > div:nth-child(2).member > :nth-child(1) {
+.member-info > div:nth-child(2).member > :nth-child(1) {
     width: 60px;
     display: block;
     font-size: 13px;
 }
-.member-info > div:first-child > div:nth-child(2).member > :nth-child(2) {
+.member-info > div:nth-child(2).member > :nth-child(2) {
     margin-left: 20px;
 }
+
+
+.custom-face-tooltip {
+    padding: 0;
+    border: 2px solid var(--color-main);
+    max-width: 90vw;
+    max-height: 35vh;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    transform: translate(-50%, calc(-100% - 0.8rem)) scale(0.5);
+    transform-origin: bottom;
+    border-radius: 7px;
+}
+
 
 .chat-info-pan {
     pointer-events: all;
@@ -1208,6 +1222,9 @@ input {
     width: 300px;
     padding: 0;
 }
+.face-pan div.tab-body > div {
+    overflow: hidden !important;
+}
 .fase-pan-tab > li > svg {
     color: var(--color-font);
     margin-top: 10px;
@@ -1249,6 +1266,7 @@ input {
     color: var(--color-font-2);
 }
 .face-pan div.title > svg {
+    margin-left: 10px;
     cursor: pointer;
 }
 
@@ -1258,14 +1276,16 @@ input {
     width: 100%;
 }
 
-.base-face {
-    justify-content: center;
-    padding: 0 20px;
-    flex-wrap: wrap;
-    display: flex;
-    align-content: flex-start;
+.face {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
 }
-.base-face > div {
+
+.custom-face-bar .face {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.face > div {
     background: var(--color-card-2);
     border-radius: 100%;
     cursor: pointer;
@@ -1276,47 +1296,30 @@ input {
     align-items: center;
     justify-content: center;
 }
-.base-face > div > .emoji-face {
+
+.face > div > .emoji-face {
     display: block;
     margin: 7.5px;
     height: 20px;
     width: 20px;
 }
-.face-stickers {
-    height: calc(300px - 145px);
-    justify-content: center;
-    align-items: center;
-    flex-direction: row;
-    overflow-y: scroll;
-    flex-wrap: wrap;
-    display: flex;
-}
-.face-stickers > img {
-    border: 2px var(--color-card-2) solid;
-    background: var(--color-card-2);
-    border-radius: 7px;
+
+.face > span {
     cursor: pointer;
-    height: 50px;
-    width: 50px;
-    margin: 5px;
-}
-.face-stickers > div {
-    background: var(--color-card-2);
-    padding: 20px !important;
-    justify-content: center;
-    flex-direction: column;
-    align-items: center;
-    display: flex;
+    width: 60px;
     height: 60px;
-    width: 80px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 2px;
 }
-.face-stickers > div > span {
-    color: var(--color-font);
-    margin-top: 10px;
-}
-.face-stickers > div > svg {
-    color: var(--color-main);
-    width: 25px;
+
+.face > span > img {
+    background: var(--color-card-2);
+    max-height: 100%;
+    max-width: 100%;
+    margin: 5px;
+    border-radius: 7px;
 }
 
 .jin-pan {
@@ -1512,6 +1515,132 @@ input {
     display: flex;
     height: 0;
 }
+
+.img-pan-enter-active {
+    animation: img-pan-appear 0.3s;
+}
+
+.img-pan-leave-active {
+    animation: img-pan-appear 0.3s reverse;
+}
+
+@keyframes img-pan-appear {
+    from {
+        height: 0;
+    }
+
+    to {
+        height: calc(15vh + 0.9rem + 5px + 30px);
+    }
+}
+
+.img-pan {
+    overflow-x: auto;
+    padding: 0;
+    background-color: var(--color-card-1);
+    pointer-events: all;
+    margin: 10px 15px;
+}
+
+.img-pan > .imgs {
+    height: auto;
+    width: auto;
+    margin: 0;
+    display: flex;
+    flex-direction: row;
+}
+
+.img-pan > .imgs > div {
+    display: flex;
+    position: relative;
+    flex-direction: column;
+    padding: 5px;
+    border-radius: 7px;
+    border: 1px solid var(--color-main);
+    overflow: hidden;
+    margin: 10px 5px;
+    flex-shrink: 0;
+}
+
+.img-pan > .imgs > div:first-child {
+    margin-left: 10px;
+}
+.img-pan > .imgs > div:last-child {
+    margin-right: 10px;
+}
+
+.img-pan > .imgs > div > .img-btns {
+    position: absolute;
+    background-color: var(--color-bg);
+    display: flex;
+    border-radius: 1mm;
+    top: 1mm;
+    right: 1mm;
+}
+
+.img-pan > .imgs > div > .img-btns > div {
+    width: 5mm;
+    height: 5mm;
+    padding: 1mm;
+    display: flex;
+    transition: background-color 0.3s;
+}
+.img-pan > .imgs > div > .img-btns > div:nth-child(1) {
+    margin-right: 1mm;
+}
+
+.img-pan > .imgs > div > .img-btns > div > svg {
+    width: 5mm;
+    height: 5mm;
+    margin: 0;
+}
+.img-pan > .imgs > div > .img-btns > div:nth-child(1) > svg {
+    margin-top: 1mm;
+    margin-left: 1mm;
+    width: 5mm;
+    height: 4mm;
+}
+
+.img-pan > .imgs > div > .img-btns > div:hover {
+    background-color: var(--color-card-2);
+    cursor: pointer;
+}
+
+.img-pan > .imgs > div > .img {
+    width: 100px;
+    height: 15vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-color: var(--color-card-1);
+    border-radius: 7px;
+    overflow: hidden;
+}
+
+.img-pan > .imgs > div > .img > img {
+    max-width: 100%;
+    max-height: 100%;
+}
+
+.img-pan > .imgs > div > span {
+    color: var(--color-font-1);
+    margin-top: 5px;
+    font-size: 0.9rem;
+    text-align: center;
+    background-color: var(--color-card);
+    border-radius: 7px;
+}
+
+.input-special-tag {
+    background: var(--color-card);
+    transition: all 0.3s;
+    align-items: center;
+    flex-direction: row;
+    border-radius: 7px;
+    overflow: hidden;
+    display: flex;
+    height: 0;
+}
 .replay-tag.show {
     margin: 0 20px -10px 20px;
     margin-top: 20px;
@@ -1566,8 +1695,12 @@ input {
     cursor: pointer;
     padding: 10px;
     display: flex;
+    margin: 5px;
 }
 .at-tag > div:hover {
+    background: var(--color-card-2);
+}
+.at-tag > div.selected {
     background: var(--color-card-2);
 }
 .at-tag > div > img {

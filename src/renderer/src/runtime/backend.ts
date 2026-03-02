@@ -51,6 +51,24 @@ export const backend = {
     },
 
     /**
+     * 反代理 URL 转换
+     * @param url 需要转换的 URL
+     * @returns 转换后的 URL
+     */
+    unProxyUrl(url: string) {
+        if (this.proxy && url && url.startsWith('http://localhost')) {
+            const urlObj = new URL(url)
+            if (urlObj.pathname == '/proxy') {
+                const realUrl = urlObj.searchParams.get('url')
+                if (realUrl) {
+                    return decodeURIComponent(realUrl)
+                }
+            }
+        }
+        return url
+    },
+
+    /**
      * 初始化后端功能
      *
      * @returns {Promise<void>}
@@ -86,6 +104,10 @@ export const backend = {
         const releaseData = await this.call('Onebot', 'sys:getRelease', true)
         this.release = releaseData?.release || ''
         this.arch = releaseData?.arch || undefined
+
+        if(this.type == 'web' && !this.platform) {
+            this.platform = 'web'
+        }
 
         if (!this.release) {
             let os = ''
@@ -196,9 +218,6 @@ export const backend = {
                 logger.add(LogType.DEBUG, `调用后端方法 ${(type ?? '') + ' - '}${name} 失败`, ex)
                 return undefined
             }
-        } else {
-            logger.add(LogType.ERR, '调用后端方法失败', new Error('当前运行环境不支持调用后端方法'))
-            return undefined
         }
     },
 
@@ -228,9 +247,12 @@ export const backend = {
         if(this.listener) {
             if(this.isDesktop()) {
                 this.listener(name, callBack)
+                return
             } else if(this.isMobile() && type) {
                 this.listener(type, name, callBack)
+                return
             }
         }
+        logger.error(null, `添加后端监听失败：${name}(${type})`)
     },
 }

@@ -15,7 +15,6 @@ import qed from '@renderer/assets/qed.txt?raw'
 
 import app from '@renderer/main'
 import Option from './option'
-import pinyin from 'tiny-pinyin'
 
 import Umami from '@stapxs/umami-logger-typescript'
 
@@ -60,16 +59,17 @@ import { Notify } from './notify'
 import { backend } from '@renderer/runtime/backend'
 import { refreshFavicon } from './favicon'
 import { Img } from './model/img'
+import { getPinyin } from './utils/pinyin'
 
 const popInfo = new PopInfo()
 // eslint-disable-next-line
-const msgPaths = import.meta.glob("@renderer/assets/pathMap/*.yaml", { eager: true})
+const msgPaths = import.meta.glob("@renderer/assets/pathMap/*.yaml", { eager: true })
 // 取出包含 Lagrange.OneBot.yaml 的那条
 const msgPathAt = Object.keys(msgPaths).find((item) => {
     return item.indexOf('Lagrange.OneBot.yaml') > 0
 })
 let msgPath = {} as { [key: string]: any }
-if(msgPathAt != undefined) {
+if (msgPathAt != undefined) {
     msgPath = (msgPaths[msgPathAt] as any).default
 }
 // 其他 tag
@@ -177,10 +177,10 @@ const noticeFunctions = {
                 // eslint-disable-next-line no-console
                 console.log(
                     '%c消失了一个好友：' +
-                        msg.nickname +
-                        '（' +
-                        msg.user_id +
-                        '）',
+                    msg.nickname +
+                    '（' +
+                    msg.user_id +
+                    '）',
                     'color:red;',
                 )
                 break
@@ -235,6 +235,30 @@ const noticeFunctions = {
     },
 
     /**
+     * 踢人
+     */
+    kick: (_: string, msg: { [key: string]: any }) => {
+        const groupId = msg.group_id
+        if (groupId == runtimeData.chatInfo.show.id) {
+            // 稍微等一下再刷新成员列表
+            delay(1000).then(() => {
+                Connector.send(
+                    'get_group_member_list',
+                    { group_id: runtimeData.chatInfo.show.id, no_cache: true },
+                    'getGroupMemberList',
+                )
+                return delay(1000)
+            }).then(() => {
+                Connector.send(
+                    'get_group_member_list',
+                    { group_id: runtimeData.chatInfo.show.id, no_cache: true },
+                    'getGroupMemberList',
+                )
+            })
+        }
+    },
+
+    /**
      * 戳一戳
      */
     poke: (_: string, msg: { [key: string]: any }) => {
@@ -274,7 +298,7 @@ const noticeFunctions = {
             info.forEach((item: any) => {
                 switch (item.type) {
                     case 'img':
-                        str += `<img src="${ backend.proxyUrl(item.src) }"/>`
+                        str += `<img src="${backend.proxyUrl(item.src)}"/>`
                         break
                     case 'nor':
                         str += item.txt
@@ -326,7 +350,7 @@ const noticeFunctions = {
     input_status: (_: string, msg: { [key: string]: any }) => {
         const { $t } = app.config.globalProperties
         const sender = msg.user_id
-        if(runtimeData.chatInfo.show.id == sender) {
+        if (runtimeData.chatInfo.show.id == sender) {
             runtimeData.chatInfo.show.appendInfo = $t('对方正在输入……')
             setTimeout(() => {
                 runtimeData.chatInfo.show.appendInfo = undefined
@@ -381,7 +405,7 @@ const msgFunctions = {
                 const appVersion = data.app_version ? ',' + data.app_version : ''
                 const appInfo = data.app_name ? data.app_name + appVersion : '（未知）'
 
-                sendStatEvent('connect', { method: data.app_version })
+                sendStatEvent('connect', { method: data.app_name })
                 sendIdentifyData({ bot_version: appInfo })
             }
             if (!login.status) {
@@ -418,7 +442,7 @@ const msgFunctions = {
                 value: data.nickname,
             })
             const title = `${data.nickname} `
-            if(backend.platform == 'web') {
+            if (backend.platform == 'web') {
                 document.title = title + '- Stapxs QQ Lite'
             } else {
                 document.title = title
@@ -511,18 +535,19 @@ const msgFunctions = {
             let name: string
             if (item.card != undefined && item.card != '') {
                 name = item.card
-            }else if (item.nickname != undefined && item.nickname != '') {
+            } else if (item.nickname != undefined && item.nickname != '') {
                 name = item.nickname
-            }else{
+            } else {
                 name = item.user_id.toString()
             }
 
             // 获取拼音首字母
             const first = name.substring(0, 1)
-            item.py_start = pinyin
-                .convertToPinyin(first, '')
-                .toUpperCase()
-                .substring(0, 1)
+            item.py_start = getPinyin(first)
+                .main
+                .at(0)
+                ?.substring(0, 1)
+                .toUpperCase() ?? ' '
         })
         // 筛选列表
         const adminList = data.filter((item: GroupMemberInfoElem) => {
@@ -576,7 +601,7 @@ const msgFunctions = {
             return
         }
         const pan = document.getElementById('msgPan')
-        if(pan) {
+        if (pan) {
             const oldScrollHeight = pan.scrollHeight
             saveMsg(msg, 'top').then(() => {
                 nextTick(() => {
@@ -599,7 +624,7 @@ const msgFunctions = {
     ) => {
         const id = Number(echoList[1])
         if (id) {
-                try {
+            try {
                 // 对消息进行一次格式化处理
                 let list = getMsgData('message_list', msg, msgPath.message_list)
                 if (list != undefined) {
@@ -609,10 +634,10 @@ const msgFunctions = {
                         msgPath.message_value,
                     )
                     const raw = getMsgRawTxt(list[0])
-                    const {time} = list[0]
+                    const { time } = list[0]
                     // 更新消息列表
                     const onmsg = runtimeData.baseOnMsgList.get(Number(id))
-                    if(onmsg) {
+                    if (onmsg) {
                         onmsg.raw_msg = raw
                         onmsg.time = getViewTime(Number(time))
                         runtimeData.baseOnMsgList.set(id, onmsg)
@@ -713,8 +738,8 @@ const msgFunctions = {
         // runtimeData.chatInfo.info.user_info =
         //     msg.data.data.result.buddy.info_list[0]
         const data = getMsgData('friend_info', msg, msgPath.friend_info)[0]
-		data.regTime = new Date(data.reg_time).getTime()
-        if(data) {
+        data.regTime = new Date(data.reg_time).getTime()
+        if (data) {
             runtimeData.chatInfo.info.user_info = data
         }
     },
@@ -733,7 +758,7 @@ const msgFunctions = {
             const img = markRaw(new Img(
                 `https://p.qlogo.cn/gdynamic/${notice.img_id}/0/`
             ))
-            if(lastImg) img.insertPrev(lastImg)
+            if (lastImg) img.insertPrev(lastImg)
             notice.img = img
             lastImg = img
         }
@@ -771,7 +796,7 @@ const msgFunctions = {
 
         // 默认使用主目录相同的结构，如果存在子目录结构的定义则使用子目录的结构
         let map = msgPath.group_files
-        if(msgPath.group_folder_files.source) {
+        if (msgPath.group_folder_files.source) {
             map = msgPath.group_folder
         }
         const list = getMsgData('group_files', msg, map) as (GroupFileElem & GroupFileFolderElem)[]
@@ -866,8 +891,8 @@ const msgFunctions = {
         const onProcess = function (event: ProgressEvent): undefined {
             if (!event.lengthComputable) return
             const percent = Math.floor((event.loaded / event.total) * 100)
-            if(listItem) {
-                if(listItem.download_percent == undefined) {
+            if (listItem) {
+                if (listItem.download_percent == undefined) {
                     listItem.download_percent = 0
                 }
                 listItem.download_percent = percent
@@ -876,7 +901,7 @@ const msgFunctions = {
 
         // 下载文件
         downloadFile(url, fileName, onProcess, () => {
-            if(listItem) {
+            if (listItem) {
                 listItem.download_percent = undefined
             }
         })
@@ -960,16 +985,16 @@ const msgFunctions = {
                 }, 5000)
             } else {
                 // 列表内最近的一条 fake_msg（倒序查找）
-                let fakeIndex = -1
+                let fakeMsg = null as any
                 for (let i = runtimeData.messageList.length - 1; i > 0; i--) {
                     const msg = runtimeData.messageList[i]
                     if (msg.fake_msg != undefined && info.sender == runtimeData.loginInfo.uin) {
-                        fakeIndex = i
+                        fakeMsg = msg
                         break
                     }
                 }
                 // 预发送消息刷新
-                if (fakeIndex != -1) {
+                if (fakeMsg != null) {
                     // 将这条消息直接替换掉
                     const trueMsg = getMsgData(
                         'message_list',
@@ -977,15 +1002,13 @@ const msgFunctions = {
                         msgPath.message_list,
                     )
                     getMessageList(trueMsg).then((trueMsg) => {
-                        if (trueMsg && trueMsg.length == 1 &&
-                            runtimeData.messageList[fakeIndex]) {
-                            runtimeData.messageList[fakeIndex].message = trueMsg[0].message
-                            runtimeData.messageList[fakeIndex].raw_message =
-                                trueMsg[0].raw_message
-                            runtimeData.messageList[fakeIndex].time = trueMsg[0].time
-
-                            runtimeData.messageList[fakeIndex].fake_msg = undefined
-                            runtimeData.messageList[fakeIndex].revoke = false
+                        if (trueMsg?.length == 1) {
+                            // 使用消息对象引用直接更新，避免索引问题
+                            fakeMsg.message = trueMsg[0].message
+                            fakeMsg.raw_message = trueMsg[0].raw_message
+                            fakeMsg.time = trueMsg[0].time
+                            fakeMsg.fake_msg = undefined
+                            fakeMsg.revoke = false
                         }
                     })
                 }
@@ -1164,14 +1187,14 @@ const msgFunctions = {
 }
 
 const handlers: Record<string, (payload: any, metaArgs?: string[]) => void> = {
-  ...(Object.entries(msgFunctions).reduce((acc, [key, fn]) => ({
-    ...acc,
-    [key]: (payload: any, metaArgs?: string[]) => fn(key, payload, metaArgs)
-  }), {})),
-  ...(Object.entries(noticeFunctions).reduce((acc, [key, fn]) => ({
-    ...acc,
-    [key]: (payload: any) => fn(key, payload)
-  }), {}))
+    ...(Object.entries(msgFunctions).reduce((acc, [key, fn]) => ({
+        ...acc,
+        [key]: (payload: any, metaArgs?: string[]) => fn(key, payload, metaArgs)
+    }), {})),
+    ...(Object.entries(noticeFunctions).reduce((acc, [key, fn]) => ({
+        ...acc,
+        [key]: (payload: any) => fn(key, payload)
+    }), {}))
 };
 
 // ==========================================
@@ -1212,22 +1235,23 @@ function saveUser(msg: { [key: string]: any }, type: string) {
     if (list != undefined) {
         const groupNames = {} as { [key: number]: string }
         list.forEach((item, index) => {
-            if(item.group_name  == null || item.group_name == undefined) {
+            if (item.group_name == null || item.group_name == undefined) {
                 item.group_name = ''
             }
             // 为所有项目追加拼音名称
-            let py_name = ''
+            let pyMatchName = ''
             if (item.group_id) {
-                py_name = pinyin.convertToPinyin(item.group_name)
+                pyMatchName = item.group_name
             } else {
-                py_name =
-                    pinyin.convertToPinyin(item.nickname) +
-                    ',' +
-                    pinyin.convertToPinyin(item.remark)
+                pyMatchName = `${item.nickname},${item.remark}`
             }
-            if (list && list[index]) {
-                list[index].py_name = py_name.toLowerCase()
-                list[index].py_start = py_name.substring(0, 1).toUpperCase()
+            if (list?.[index]) {
+                list[index].py_name = getPinyin(pyMatchName)
+                list[index].py_start = list[index]
+                    .py_name
+                    .main.at(0)
+                    ?.substring(0, 1)
+                    .toUpperCase() ?? ' '
             }
             // 构建分类
             if (type == 'friend') {
@@ -1461,7 +1485,7 @@ async function msgPreprocess(msg: any): Promise<any> {
                     id: data['meta']['detail']['resid'],
                 }]
             }
-        } catch (e){/**/}
+        } catch (e) {/**/ }
     }
     //#endregion
 
@@ -1470,11 +1494,20 @@ async function msgPreprocess(msg: any): Promise<any> {
         const forwardId = msg.message.at(0).id
         if (forwardId) {
             try {
-                const originData = await Connector.callApi('forward_msg', {id: forwardId})
-                const data = await getMessageList(originData)
-                if (data) msg.message.at(0).content = data
-            }catch (e) {/**/}
-        }else {
+                if (msg.message.at(0).content && msg.message.at(0).content.length > 0) {
+                    // 如果 content 里已经有内容了就直接用 content 里的内容
+                    const data = await getMessageList(msg.message.at(0).content)
+                    if (data) msg.message.at(0).content = data
+                } else {
+                    // 否则调用接口获取
+                    const originData = await Connector.callApi('forward_msg', { id: forwardId })
+                    const data = await getMessageList(originData)
+                    if (data) msg.message.at(0).content = data
+                }
+            } catch (e) {
+                logger.error(e as unknown as Error, '合并转发解析失败')
+            }
+        } else {
             msg.message.at(0).content = []
         }
     }
@@ -1483,7 +1516,7 @@ async function msgPreprocess(msg: any): Promise<any> {
     //#region == lgr 商场表情 =============================
     // 过滤掉mface后面尾随的字符串
     const filter: any[] = []
-    for (let id = 0;id < msg.message.length;id++) {
+    for (let id = 0; id < msg.message.length; id++) {
         const seg = msg.message[id]
         filter.push(seg)
         if (seg.type === 'mface') id++
@@ -1494,40 +1527,35 @@ async function msgPreprocess(msg: any): Promise<any> {
 }
 
 function revokeMsg(_: string, msg: any) {
-    const chatId =
-        msg.notice_type.indexOf('group') >= 0 ? msg.group_id : msg.user_id
-    const msgId = msg.message_id
+    // 清除通知
+    const chatId = msg.notice_type.includes('group') ? msg.group_id : msg.user_id
+    new Notify().closeAll(chatId)
+
     // 寻找消息
+    const msgId = msg.message_id
     let msgGet = null as { [key: string]: any } | null
-    let msgIndex = -1
-    runtimeData.messageList.forEach((item, index) => {
-        if (item.message_id === msgId) {
-            msgGet = item
+    let msgIndex!: number
+    for (const [index, msg] of runtimeData.messageList.entries()) {
+        if (msg.message_id === msgId) {
+            msgGet = msg
             msgIndex = index
         }
-    })
-    if (msgGet !== null && msgIndex !== -1) {
-        runtimeData.messageList[msgIndex].revoke = true
-        if (
-            runtimeData.messageList[msgIndex].sender.user_id !=
-            runtimeData.loginInfo.uin
-        ) {
-            runtimeData.messageList.splice(msgIndex, 1)
-        }
-        if (msgGet.sender.user_id !== runtimeData.loginInfo.uin) {
-            // 显示撤回提示
-            const list = runtimeData.messageList
-            if (msgIndex !== -1) {
-                list.splice(msgIndex + 1, 0, msg)
-            } else {
-                list.push(msg)
-            }
-        }
-    } else {
-        logger.error(null, '没有找到这条被撤回的消息 ……')
     }
-    // 撤回通知
-    new Notify().closeAll(chatId)
+
+    if (!msgGet) {
+        logger.add(LogType.UI, '没有找到这条被撤回的消息')
+        return
+    }
+
+    // 移除消息
+    runtimeData.messageList.splice(msgIndex, 1)
+
+    if (msgGet.sender.user_id === runtimeData.loginInfo.uin)
+        msg.originMsg = msgGet
+
+    // 显示撤回提示
+    const list = runtimeData.messageList
+    list.splice(msgIndex + 1, 0, msg)
 }
 
 let qed_try_times = 0
@@ -1554,16 +1582,16 @@ function newMsg(_: string, data: any) {
 
         // 预发送消息填充 ============================================
         // 列表内最近的一条 fake_msg（倒序查找）
-        let fakeIndex = -1
+        let fakeMsg = null as any
         for (let i = runtimeData.messageList.length - 1; i > 0; i--) {
             const msg = runtimeData.messageList[i]
             if (msg.fake_msg != undefined && sender == loginId) {
-                fakeIndex = i
+                fakeMsg = msg
                 break
             }
         }
         // 预发送消息刷新
-        if (fakeIndex != -1) {
+        if (fakeMsg != null) {
             // 将这条消息直接替换掉
             const trueMsg = getMsgData(
                 'message_list',
@@ -1571,15 +1599,13 @@ function newMsg(_: string, data: any) {
                 msgPath.message_list,
             )
             getMessageList(trueMsg).then((trueMsg) => {
-                if (trueMsg && trueMsg.length == 1 &&
-                    runtimeData.messageList[fakeIndex]) {
-                    runtimeData.messageList[fakeIndex].message = trueMsg[0].message
-                    runtimeData.messageList[fakeIndex].raw_message =
-                        trueMsg[0].raw_message
-                    runtimeData.messageList[fakeIndex].time = trueMsg[0].time
-
-                    runtimeData.messageList[fakeIndex].fake_msg = undefined
-                    runtimeData.messageList[fakeIndex].revoke = false
+                if (trueMsg?.length == 1) {
+                    // 使用消息对象引用直接更新，避免索引问题
+                    fakeMsg.message = trueMsg[0].message
+                    fakeMsg.raw_message = trueMsg[0].raw_message
+                    fakeMsg.time = trueMsg[0].time
+                    fakeMsg.fake_msg = undefined
+                    fakeMsg.revoke = false
                 }
             })
             // 移除最顶端的一条消息以被动刷新整个列表
@@ -1663,7 +1689,7 @@ function newMsg(_: string, data: any) {
         }
 
         // 群收纳箱 ============================================
-        if(runtimeData.sysConfig.bubble_sort_user) {
+        if (runtimeData.sysConfig.bubble_sort_user) {
             // 刷新群收纳箱列表
             let getGroup = runtimeData.baseOnMsgList.get(Number(id))
             // ( 如果 是群组消息 && 群组没有开启通知 && 不是置顶的 ) 这种情况下将群消息添加到群收纳盒中
@@ -1675,7 +1701,7 @@ function newMsg(_: string, data: any) {
             }
             if (getGroup) {
                 getGroup.message_id = data.message_id
-                const name = data.sender.card && data.sender.card !== ''? data.sender.card: data.sender.nickname
+                const name = data.sender.card && data.sender.card !== '' ? data.sender.card : data.sender.nickname
                 getGroup.raw_msg = name + ': ' + getMsgRawTxt(data)
                 getGroup.raw_msg_base = getMsgRawTxt(data)
                 getGroup.time = getViewTime(Number(data.time))
@@ -1691,7 +1717,8 @@ function newMsg(_: string, data: any) {
 
         // 通知判定 ============================================
         // eslint-disable-next-line max-len
-        // (发送者不是自己 && (在特别关心列表里 || 发送者不是群组 || 开启了群组通知模式 || 群组 AT || 群组 AT 全体 || 群组开启了通知)) 这些情况需要进行新消息处理
+        // (发送者不是自己 && (在特别关心列表里 || 发送者不是群组 || 开启了群组通知模式 || 群组 AT
+        //      || 群组 AT 全体 || 群组开启了通知)) 这些情况需要进行新消息处理
         if (
             sender != loginId &&
             sender != 0 &&
@@ -1733,10 +1760,10 @@ function newMsg(_: string, data: any) {
 
                     title: data.group_name ?? data.sender.nickname,
                     body:
-                        data.message_type === 'group'? data.sender.nickname + ':' + raw: raw,
+                        data.message_type === 'group' ? data.sender.nickname + ':' + raw : raw,
                     tag: `${id}/${data.message_id}`,
                     icon:
-                        data.message_type === 'group'? `https://p.qlogo.cn/gh/${id}/${id}/0`: `https://q1.qlogo.cn/g?b=qq&s=0&nk=${id}`,
+                        data.message_type === 'group' ? `https://p.qlogo.cn/gh/${id}/${id}/0` : `https://q1.qlogo.cn/g?b=qq&s=0&nk=${id}`,
                     image: undefined as any,
                     type: data.group_id ? 'group' : 'user',
                     is_important: isImportant,
@@ -1781,10 +1808,13 @@ function newMsg(_: string, data: any) {
                     runtimeData.baseOnMsgList.set(Number(id), showUser)
                 }
             }
-            if(id !== showId) {
+            if (id !== showId) {
                 const user = runtimeData.baseOnMsgList.get(id)
                 if (user) {
-                    user.new_msg = true
+                    if (!user.new_msg) {
+                        user.new_msg = true
+                        runtimeData.newMsgCount++
+                    }
                     runtimeData.baseOnMsgList.set(id, user)
                 }
             }
@@ -1794,7 +1824,7 @@ function newMsg(_: string, data: any) {
 
         // 消息列表 ============================================
         // 刷新消息列表
-        if(!runtimeData.sysConfig.bubble_sort_user && data.message_type === 'group') {
+        if (!runtimeData.sysConfig.bubble_sort_user && data.message_type === 'group') {
             const getList = runtimeData.userList.filter((item) => {
                 return item.group_id === id
             })
@@ -1806,22 +1836,22 @@ function newMsg(_: string, data: any) {
             }
         }
         // 刷新消息
-        if(get) {
+        if (get) {
             const item = runtimeData.baseOnMsgList.get(Number(id))
-            if(item) {
+            if (item) {
                 item.message_id = data.message_id
                 if (data.message_type === 'group') {
                     const name =
-                        data.sender.card && data.sender.card !== ''? data.sender.card: data.sender.nickname
+                        data.sender.card && data.sender.card !== '' ? data.sender.card : data.sender.nickname
                     item.raw_msg = name + ': ' + getMsgRawTxt(data)
                 } else {
                     item.raw_msg = getMsgRawTxt(data)
                 }
                 item.time = getViewTime(Number(data.time))
-                if(id != showId) {
-                    if(data.atme) { item.highlight = $t('[有人@你]') }
-                    if(data.atall) { item.highlight = $t('[@全体]') }
-                    if(isImportant) { item.highlight = $t('[特別关心]') }
+                if (id != showId) {
+                    if (data.atme) { item.highlight = $t('[有人@你]') }
+                    if (data.atall) { item.highlight = $t('[@全体]') }
+                    if (isImportant) { item.highlight = $t('[特別关心]') }
                 }
                 runtimeData.baseOnMsgList.set(Number(id), item)
             }
@@ -1852,15 +1882,15 @@ function updateSysInfo(
 // ==============================================================
 
 function formatMessageData(data: any, isGroup: boolean) {
-    const name = data.sender.card && data.sender.card !== '' ? data.sender.card: data.sender.nickname
+    const name = data.sender.card && data.sender.card !== '' ? data.sender.card : data.sender.nickname
 
     return {
-      message_id: data.message_id,
-      raw_msg: isGroup ? `${name}: ${getMsgRawTxt(data)}` : getMsgRawTxt(data),
-      time: getViewTime(Number(data.time)),
-      raw_msg_base: getMsgRawTxt(data)
+        message_id: data.message_id,
+        raw_msg: isGroup ? `${name}: ${getMsgRawTxt(data)}` : getMsgRawTxt(data),
+        time: getViewTime(Number(data.time)),
+        raw_msg_base: getMsgRawTxt(data)
     }
-  }
+}
 
 const baseRuntime = {
     plantform: {} as any,
@@ -1909,6 +1939,7 @@ const baseRuntime = {
     showList: [],
     systemNoticesList: undefined,
     baseOnMsgList: new Map<number, UserFriendElem & UserGroupElem>(),
+    newMsgCount: 0,
     onMsgList: [],
     groupAssistList: [],
     loginInfo: {},
@@ -1917,7 +1948,7 @@ const baseRuntime = {
     messageList: [],
     popBoxList: [],
     mergeMsgStack: [],
-	inch: getInch(),
+    inch: getInch(),
 }
 
 export const runtimeData: RunTimeDataElem = reactive(baseRuntime)

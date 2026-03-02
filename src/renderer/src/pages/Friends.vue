@@ -128,7 +128,7 @@
                 <font-awesome-icon :icon="['fas', 'inbox']" />
                 <span>{{ $t('选择联系人开始聊天') }}</span>
             </div>
-            <div v-else-if="runtimeData.messageList.length > 0" class="ss-card">
+            <div v-else-if="runtimeData.messageList.length > 0" class="ss-card cd">
                 <font-awesome-icon :icon="['fas', 'angles-right']" />
                 <span>(っ≧ω≦)っ</span>
                 <span>{{ $t('别划了别划了被看见了啦') }}</span>
@@ -147,13 +147,14 @@
     import {
         BaseChatInfoElem,
         UserFriendElem,
+        UserGroupElem,
     } from '@renderer/function/elements/information'
-    import { UserGroupElem } from '@renderer/function/elements/information'
 
     import { runtimeData } from '@renderer/function/msg'
     import { reloadUsers } from '@renderer/function/utils/appUtil'
     import { login as loginInfo } from '@renderer/function/connect'
     import { backend } from '@renderer/runtime/backend'
+    import { matchPinyin } from '@renderer/function/utils/pinyin'
 
     export default defineComponent({
         name: 'ViewFriends',
@@ -228,7 +229,7 @@
              * @param event 输入事件
              */
             search(event: Event) {
-                const value = (event.target as HTMLInputElement).value
+                const value = (event.target as HTMLInputElement).value.toLocaleLowerCase()
                 if (value !== '') {
                     this.isSearch = true
                     this.runtimeData.showList = this.list.filter(
@@ -236,13 +237,11 @@
                             const name = (
                                 item.user_id? item.nickname + item.remark: item.group_name
                             ).toLowerCase()
-                            const py = item.py_name ? item.py_name : ''
+                            if (name.includes(value)) return true
                             const id = item.user_id? item.user_id: item.group_id
-                            return (
-                                id.toString() === value ||
-                                py.indexOf(value.toLowerCase()) != -1 ||
-                                name.indexOf(value.toLowerCase()) != -1
-                            )
+                            if (id.toString() === value) return true
+                            if (item.py_name && matchPinyin(item.py_name, value)) return true
+                            return false
                         },
                     )
                 } else {

@@ -8,7 +8,8 @@
     <div v-if="['linux', 'win32'].includes(backend.platform ?? '')"
         :class="'top-bar' + ((backend.platform == 'win32' && dev) ? ' win' : '')"
         name="appbar"
-        data-tauri-drag-region="true">
+        data-tauri-drag-region="true"
+        @mousedown="handleAppbarMouseDown">
         <div class="bar-button" @click="barMainClick()" />
         <div class="space" />
         <div class="controller">
@@ -50,7 +51,7 @@
             <div :style="get('fs_adaptation') > 0 ? `height: calc(100% - ${75 + Number(get('fs_adaptation'))}px);` : ''">
                 <div v-if="tags.page == 'Home'" id="homeTab" name="主页">
                     <div class="home-body">
-                        <div class="login-pan-card ss-card">
+                        <div v-if="!napcat" class="login-pan-card ss-card">
                             <font-awesome-icon :icon="['fas', 'circle-nodes']" />
                             <p>{{ $t('连接到 OneBot') }}</p>
                             <form @submit.prevent @submit="connect">
@@ -157,16 +158,12 @@
                 </div>
             </div>
         </TransitionGroup>
-        <Transition>
+        <Transition name="modal">
             <div v-if="runtimeData.popBoxList.length > 0" id="pop-box" class="pop-box">
                 <div :class="'pop-box-body ss-card' +
                          (runtimeData.popBoxList[0].full ? ' full' : '') +
                          (get('option_view_no_window') == true ? '' : ' window')"
-                    :style="'transform: translate(-50%, calc(-50% - ' +
-                        (runtimeData.popBoxList.length > 3 ?
-                            3 : runtimeData.popBoxList.length) * 10 + 'px));' +
-                        (get('fs_adaptation') > 0 ?
-                            ` margin-bottom: ${40 + Number(get('fs_adaptation'))}px;` : '')">
+                    :style="(get('fs_adaptation') > 0 ? ` margin-bottom: ${40 + Number(get('fs_adaptation'))}px;` : '')">
                     <header v-show="runtimeData.popBoxList[0].title != undefined">
                         <div v-if="runtimeData.popBoxList[0].svg != undefined">
                             <font-awesome-icon :icon="['fas', runtimeData.popBoxList[0].svg]" />
@@ -197,6 +194,8 @@
         <!-- 全局搜索栏 -->
         <GlobalSessionSearchBar />
         <NtViewer ref="nt-viewer" />
+        <!-- 提示工具 -->
+        <Tooltips />
         <div id="mobile-css" />
     </div>
 </template>
@@ -226,6 +225,7 @@ import Messages from '@renderer/pages/Messages.vue'
 import { backend } from './runtime/backend'
 import GlobalSessionSearchBar from './components/GlobalSessionSearchBar.vue'
 import NtViewer from './components/ViewerCom.vue'
+import Tooltips from './components/tooltip/Tooltips.vue'
 
 // 注册组件实例
 const ntViewer = useTemplateRef<InstanceType<typeof NtViewer>>('nt-viewer')
@@ -240,6 +240,7 @@ export default defineComponent({
             repoName: import.meta.env.VITE_APP_REPO_NAME,
             appClient: backend,
             dev: import.meta.env.DEV,
+            napcat: import.meta.env.VITE_NAPCAT,
             sse: import.meta.env.VITE_APP_SSE_MODE == 'true',
             defineAsyncComponent: defineAsyncComponent,
             save: Option.runASWEvent,
@@ -306,10 +307,15 @@ export default defineComponent({
             Option.run('opt_dark', Option.get('opt_dark'))
             Option.run('opt_auto_dark', Option.get('opt_auto_dark'))
             Option.run('theme_color', Option.get('theme_color'))
-            Option.run(
-                'merge_forward_width_type',
-                Option.get('merge_forward_width_type'),
-            )
+            // 流体玻璃样式附加设置
+            if (Option.get('glass_effect')) {
+                const app = document.getElementById('app')
+                const body = document.body
+                if(app && body) {
+                    body.style.setProperty('background', 'rgba(var(--color-bg-rgb), 0.5)', 'important')
+                    app.style.borderRadius = '25px'
+                }
+            }
             if (['linux', 'win32'].includes(backend.platform ?? '')) {
                 const app = document.getElementById('base-app')
                 if (app) app.classList.add('withBar')
@@ -342,14 +348,47 @@ export default defineComponent({
             // 加载密码保存和自动连接
             loginInfo.address = runtimeData.sysConfig.address
             if (
-                runtimeData.sysConfig.save_password &&
-                runtimeData.sysConfig.save_password != true
+                runtimeData.sysConfig.save_password !== undefined &&
+                runtimeData.sysConfig.save_password !== true
             ) {
                 loginInfo.token = runtimeData.sysConfig.save_password
                 this.tags.savePassword = true
             }
             if (runtimeData.sysConfig.auto_connect == true) {
                 this.connect()
+            }
+            if(import.meta.env.VITE_NAPCAT) {
+                logger.info('Stapxs QQ Lite 处于 Napcat 模式 ……')
+                const token = localStorage.getItem('token')
+                if(token) {
+                    // api/Debug/create 获取连接配置信息
+                    fetch('/api/Debug/create', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': 'Bearer ' + token
+                        }
+                    }).then(async (response) => {
+                        if(response.ok) {
+                            const data = await response.json()
+                            // 获取当前页面的根 URL
+                            const rootUrl = window.location.origin
+                            loginInfo.address = rootUrl.replace('http', 'ws') + '/api/Debug/ws'
+                            loginInfo.token = data.data.token
+                            this.connect()
+                        } else {
+                            logger.error(null, 'Napcat 快速连接失败，状态码：' + response.status)
+                        }
+                    }).catch((error) => {
+                        logger.error(null, 'Napcat 快速连接请求失败：' + error)
+                    })
+                    this.updateNapcatColor(token)
+                    window.addEventListener('storage', (event) => {
+                        if(event.key === 'theme') {
+                            this.updateNapcatColor(token)
+                        }
+                    })
+                }
             }
             // 服务发现
             backend.call('Onebot', 'sys:findService', false)
@@ -465,11 +504,57 @@ export default defineComponent({
         }
     },
     methods: {
+        updateNapcatColor(token: string) {
+            const logger = new Logger()
+            // api/base/Theme 获取主题配置信息
+            fetch('/api/Base/Theme', {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + token
+                }
+            }).then(async (response) => {
+                if(response.ok) {
+                    const data = await response.json()
+                    const media = window.matchMedia('(prefers-color-scheme: dark)')
+                    if(media.matches) {
+                        const colorHsl = data.data.dark['--heroui-primary']
+                        document.documentElement.style.setProperty('--color-main', `hsl(${colorHsl} / .3)`)
+                        document.documentElement.style.setProperty('--color-main-0', `hsl(${colorHsl} / .3)`)
+                    } else {
+                        const colorHsl = data.data.light['--heroui-primary']
+                        document.documentElement.style.setProperty('--color-main', `hsl(${colorHsl} / .1)`)
+                        document.documentElement.style.setProperty('--color-main-0', `hsl(${colorHsl} / .1)`)
+                    }
+                } else {
+                    logger.error(null, 'Napcat 主题获取失败，状态码：' + response.status)
+                }
+            }).catch((error) => {
+                logger.error(null, 'Napcat 主题请求失败：' + error)
+            })
+        },
+
         /**
          * electron 窗口操作
          */
         controllWin(name: string) {
             backend.call(undefined, 'win:' + name, false)
+        },
+
+        /**
+         * 处理 appbar 鼠标按下事件（Linux 平台窗口拖拽）
+         */
+        handleAppbarMouseDown(event: MouseEvent) {
+            // 只在 Linux + Tauri 平台生效
+            if (backend.platform === 'linux' && backend.type === 'tauri') {
+                // 检查是否点击了按钮或控制器
+                const target = event.target as HTMLElement
+                if (target.closest('.bar-button') || target.closest('.controller')) {
+                    return
+                }
+                // 调用 Tauri 拖拽命令
+                backend.call(undefined, 'win:startDrag', false)
+            }
         },
 
         /**
@@ -480,7 +565,8 @@ export default defineComponent({
                 // PS：快速连接的地址只会是局域网，所以默认 ws 协议
                 loginInfo.address = 'ws://' + this.tags.quickLoginSelect
             }
-            Connector.create(loginInfo.address, loginInfo.token)
+            // https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/issues/312
+            Connector.create(loginInfo.address, encodeURIComponent(loginInfo.token))
         },
         selectQuickLogin(address: string) {
             this.tags.quickLoginSelect = address
@@ -760,5 +846,50 @@ export default defineComponent({
 .appbar-enter-from,
 .appbar-leave-to {
     transform: translateY(-60px);
+}
+
+/* 弹窗动画 */
+.modal-enter-active {
+    transition: opacity 0.2s ease-out;
+}
+
+.modal-leave-active {
+    transition: opacity 0.2s ease-in;
+}
+
+.modal-leave-to {
+    opacity: 0;
+}
+
+.modal-enter-active .pop-box-body {
+    animation: panelSlideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.modal-leave-active .pop-box-body {
+    animation: panelSlideDown 0.2s cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+@keyframes panelSlideUp {
+    from {
+        transform: translate(-50%, -20%) scale(0.95);
+        opacity: 0;
+    }
+
+    to {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 1;
+    }
+}
+
+@keyframes panelSlideDown {
+    from {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 1;
+    }
+
+    to {
+        transform: translate(-50%, -5%) scale(0.98);
+        opacity: 0;
+    }
 }
 </style>

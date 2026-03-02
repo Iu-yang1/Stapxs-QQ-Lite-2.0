@@ -145,6 +145,7 @@
 }
 .buttons > a:not(:first-child) {
     margin-left: 10px !important;
+    width: 40px !important;
 }
 
 .contributors-card {
@@ -224,6 +225,10 @@
     height: calc(100% - 115px);
     flex-direction: column;
     display: flex;
+}
+.opt-tab div.tab-body > div {
+    padding-right: 7px;
+    overflow-x: hidden;
 }
 .opt-tab > div:first-child {
     min-height: 5px;
@@ -307,8 +312,9 @@
     background: var(--color-card-1);
     color: var(--color-font-2);
     border-radius: 7px;
+    font-size: 0.8rem;
     margin: 5px 0;
-    padding: 10px;
+    padding: 15px;
 }
 
 .opt-page > div:not(:first-child) {
@@ -396,6 +402,7 @@
     height: 1.1rem;
     width: 1.1rem;
 }
+.opt-item input[type='password'],
 .opt-item input[type='text'] {
     line-height: 35px;
     font-size: 0.8rem;
@@ -414,6 +421,36 @@
 }
 .opt-item div.ss-range input::-webkit-slider-runnable-track {
     opacity: 0;
+}
+
+
+.opt-item > div.file-choice {
+    display: flex;
+    max-width: 170px;
+    flex-direction: row;
+    margin-right: 0;
+}
+
+.opt-item > div.file-choice > div {
+    background: var(--color-card-1);
+    border-radius: 7px;
+    font-size: 0.8rem;
+    height: 30px;
+    min-width: 30px;
+    line-height: 30px;
+    text-align: center;
+}
+
+.opt-item > div.file-choice > div.choice-btn {
+    flex: 1;
+    padding: 0 10px;
+}
+
+.opt-item > div.file-choice > div.rm-btn {
+    margin-left: 10px;
+    width: 30px;
+    cursor: pointer;
+    color: var(--color-red);
 }
 
 .l10n-info {
@@ -514,9 +551,17 @@
     margin-top: -10px;
 }
 
+.theme-color-col > input#theme_color_custom,
 .theme-color-col > label {
     --radio-size: 16px;
     margin-left: -7px;
+}
+.theme-color-col > input#theme_color_custom {
+    transform: translateX(-100%);
+    width: var(--radio-size);
+    height: 1px;
+    z-index: -1;
+    opacity: 0;
 }
 
 .ss-radio:hover > div:nth-child(2) {
@@ -698,6 +743,7 @@
         flex:unset;
     }
     .opt-item div.ss-range,
+    .opt-item input[type='password'],
     .opt-item input[type='text'],
     .opt-item input[type='number'] {
         margin-left: calc(1.1rem + 20px);

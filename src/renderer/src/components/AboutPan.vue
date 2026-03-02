@@ -35,6 +35,9 @@
             <a>v{{ packageInfo.version }}</a>
             <div class="buttons">
                 <a class="ss-button" @click="goGithub()">{{ $t('访问 GitHub 仓库') }}</a>
+                <a class="ss-button" style="width: 30px" @click="showReleaseHistory()">
+                    <font-awesome-icon :icon="['fas', 'clock-rotate-left']" />
+                </a>
                 <a class="ss-button" style="width: 30px" @click="goFish()">
                     <font-awesome-icon :icon="['fas', 'fish']" style="transform: rotate(-45deg);" />
                 </a>
@@ -42,17 +45,21 @@
             <a class="ss-button" style="border-radius: 7px;" @click="dependencies()">{{ $t('更多信息') }}</a>
             <div v-if="sponsorList.length > 0 && showUI" class="contributors-card">
                 <div />
-                <span>{{ $t('赞助者') }}</span>
+                <span> {{ $t('赞助者') }} </span>
                 <div class="contributors">
                     <div v-for="info in sponsorList.slice(0, 3)" :key="info.user.name">
                         <img :src="info.user.avatar">
                         <div>
                             <span>{{ info.user.name }}</span>
-                            <span>{{ info.last_pay_time }}</span>
+                            <span>{{ Intl.DateTimeFormat(trueLang, {
+                                year: 'numeric',
+                                month: 'short',
+                                day: 'numeric',
+                            }).format(getViewTime(Number(info.last_pay_time))) }}</span>
                         </div>
                     </div>
                 </div>
-                <div>
+                <div v-if="sponsorList.length > 3">
                     <img v-for="info in sponsorList.slice(3)"
                         :key="info.user.name"
                         :src="info.user.avatar">
@@ -89,12 +96,15 @@
     import packageInfo from '../../../../package.json'
 
     import { defineComponent, markRaw } from 'vue'
-    import { openLink, sendStatEvent } from '@renderer/function/utils/appUtil'
+    import { openLink, sendStatEvent, showReleaseHistory } from '@renderer/function/utils/appUtil'
     import { ContributorElem } from '@renderer/function/elements/system'
 
     import { runtimeData } from '@renderer/function/msg'
+    import { getTrueLang, getViewTime } from '@renderer/function/utils/systemUtil'
 
     import MealHungryPan from '@renderer/components/notice-component/MealHungryPan.vue'
+    import { library } from '@fortawesome/fontawesome-svg-core'
+    import { faClockRotateLeft } from '@fortawesome/free-solid-svg-icons'
 
     export default defineComponent({
         name: 'AboutPan',
@@ -106,8 +116,10 @@
         },
         data() {
             return {
-                packageInfo: packageInfo,
-                openLink: openLink,
+                trueLang: 'zh-CN',
+                getViewTime,
+                packageInfo,
+                openLink,
                 constList: [] as ContributorElem[],
                 sponsorList: [] as {
                     current_plan: string,
@@ -121,6 +133,10 @@
             }
         },
         mounted() {
+            library.add(faClockRotateLeft)
+            window.onload = async () => {
+                this.trueLang = getTrueLang()
+            }
             const superThanks = ['doodlehuang']
             // 加载贡献者信息
             if(import.meta.env.VITE_APP_REPO_NAME) {
@@ -164,9 +180,20 @@
                 sendStatEvent('click_statistics', { name: 'visit_github' })
             },
 
+            showReleaseHistory() {
+                showReleaseHistory()
+            },
+
             goFish() {
                 sendStatEvent('click_statistics', { name: 'visit_fish' })
-                if(!import.meta.env.VITE_APP_SPONSORS_URL) return
+                if(!import.meta.env.VITE_APP_SPONSORS_URL) {
+                    // eslint-disable-next-line no-console
+                    console.error('是谁没有设置赞助链接？')
+                    sendStatEvent('error_statistics', {
+                        type: 'sponsor_link_missing'
+                    })
+                    return
+                }
                 const popInfo = {
                     title: '',
                     template: markRaw(MealHungryPan),
@@ -176,7 +203,7 @@
                             text: this.$t('打开…'),
                             master: true,
                             fun: () => {
-                                openLink(import.meta.env.VITE_APP_SPONSORS_URL)
+                                openLink(import.meta.env.VITE_APP_SPONSORS_URL, true)
                                 runtimeData.popBoxList.shift()
                             },
                         }

@@ -17,9 +17,11 @@
             (['linux', 'win32'].includes(backend.platform ?? '') ? ' withBar' : '')"
         :style="`background-image: url(${runtimeData.sysConfig.chat_background});`"
         @v-move-right.prevent="exitWin()">
+        <slot name="chat-extra" />
         <!-- 聊天基本信息 -->
         <div class="info">
             <font-awesome-icon :icon="['fas', 'bars-staggered']" @click="openLeftBar" />
+            <font-awesome-icon class="back" :icon="['fas', 'angle-left']" @click="exitWin" />
             <img :src="chat.show.avatar">
             <div class="info">
                 <p>
@@ -62,82 +64,80 @@
             <span>{{ $t('加载中') }}</span>
         </div>
         <!-- 消息显示区 -->
-        <div v-if="!details[3].open"
-            id="msgPan" class="chat"
+        <div id="msgPan" class="chat"
             style="scroll-behavior: smooth"
-            @scroll="chatScroll">
-            <div v-if="!runtimeData.tags.canLoadHistory" class="note note-nomsg">
-                <hr>
-                <a>{{ $t('没有更多消息了') }}</a>
-            </div>
-            <div v-if="runtimeData.tags.loadHistoryFail" class="note note-nomsg">
-                <hr>
-                <a>{{ $t('获取历史记录失败') }}</a>
-            </div>
-            <!-- 时间戳，在下滑加载的时候会显示，方便在大段的相连消息上让用户知道消息时间 -->
-            <NoticeBody v-if="tags.nowGetHistroy && list.length > 0"
-                :data="{ sub_type: 'time', time: list[0].time }" />
-            <TransitionGroup :name="runtimeData.sysConfig.opt_fast_animation ? '' : 'msglist'" tag="div">
-                <template v-for="(msgIndex, index) in list">
-                    <!-- 时间戳 -->
-                    <NoticeBody
-                        v-if="isShowTime(list[index - 1] ? list[index - 1].time : undefined, msgIndex.time)"
-                        :key="'notice-time-' + (msgIndex.time / ( 4 * 60 )).toFixed(0)"
-                        :data="{ sub_type: 'time', time: msgIndex.time }" />
-                    <!-- [已删除]消息 -->
-                    <NoticeBody
-                        v-if="isDeleteMsg(msgIndex)"
-                        :key="'delete-' + msgIndex.message_id"
-                        :data="{ sub_type: 'delete' }" />
-                    <!-- 消息体 -->
-                    <MsgBody v-else-if="(msgIndex.post_type === 'message' ||
-                                 msgIndex.post_type === 'message_sent') &&
-                                 msgIndex.message.length > 0"
-                        :key="msgIndex.fake_message_id ?? msgIndex.message_id"
-                        :selected="multipleSelectList.includes(msgIndex.message_id) || tags.menuDisplay.menuSelectedMsgId == msgIndex.message_id"
-                        :data="msgIndex"
-                        :user-info-pan="userInfoPanFunc"
-                        :image-list-header="chatImg"
-                        @click="msgClick($event, msgIndex)"
-                        @show-menu="showMsgMeun"
-                        @scroll-to-msg="scrollToMsg"
-                        @image-loaded="imgLoadedScroll"
-                        @left-move="replyMsg"
-                        @send-poke="sendPoke" />
-                    <!-- 其他通知消息 -->
-                    <NoticeBody v-else-if="msgIndex.post_type === 'notice'"
-                        :id="uuid()"
-                        :key="'notice-' + index"
-                        :data="msgIndex" />
-                </template>
-            </TransitionGroup>
-        </div>
-        <div v-else id="msgPan"
-            class="chat" style="scroll-behavior: smooth">
-            <!-- 搜索消息结果显示 -->
-            <TransitionGroup
-                :name="runtimeData.sysConfig.opt_fast_animation ? '' : 'msglist'"
-                tag="div">
-                <template v-for="(msgIndex, index) in tags.search.list">
-                    <!-- 时间戳 -->
-                    <NoticeBody
-                        v-if="isShowTime(list[index - 1] ? list[index - 1].time : undefined, msgIndex.time)"
-                        :key="'notice-time-' + index"
-                        :data="{ sub_type: 'time', time: msgIndex.time }" />
-                    <!-- 消息体 -->
-                    <MsgBody v-if=" (msgIndex.post_type === 'message' ||
-                                 msgIndex.post_type === 'message_sent') &&
-                                 msgIndex.message.length > 0"
-                        :key="msgIndex.fake_message_id ?? msgIndex.message_id"
-                        :selected="multipleSelectList.includes(msgIndex.message_id) || tags.menuDisplay.menuSelectedMsgId == msgIndex.message_id"
-                        :data="msgIndex"
-                        :user-info-pan="userInfoPanFunc"
-                        @scroll-to-msg="scrollToMsg"
-                        @show-menu="showMsgMeun"
-                        @image-loaded="imgLoadedScroll"
-                        @left-move="replyMsg" />
-                </template>
-            </TransitionGroup>
+            @scroll="chatScroll($event, details[3].open)">
+            <template v-if="!details[3].open">
+                <div v-if="!runtimeData.tags.canLoadHistory" class="note note-nomsg">
+                    <hr>
+                    <a>{{ $t('没有更多消息了') }}</a>
+                </div>
+                <div v-if="runtimeData.tags.loadHistoryFail" class="note note-nomsg">
+                    <hr>
+                    <a>{{ $t('获取历史记录失败') }}</a>
+                </div>
+                <!-- 时间戳，在下滑加载的时候会显示，方便在大段的相连消息上让用户知道消息时间 -->
+                <NoticeBody v-if="tags.nowGetHistroy && list.length > 0"
+                    :data="{ sub_type: 'time', time: list[0].time }" />
+                <TransitionGroup :name="runtimeData.sysConfig.opt_fast_animation ? '' : 'msglist'" tag="div">
+                    <template v-for="(msgIndex, index) in list">
+                        <!-- 时间戳 -->
+                        <NoticeBody
+                            v-if="isShowTime(list[Number(index) - 1] ? list[Number(index) - 1].time : undefined, msgIndex.time)"
+                            :key="'notice-time-' + (msgIndex.time / ( 4 * 60 )).toFixed(0)"
+                            :data="{ sub_type: 'time', time: msgIndex.time }" />
+                        <!-- [已删除]消息 -->
+                        <NoticeBody
+                            v-if="isDeleteMsg(msgIndex)"
+                            :key="'delete-' + msgIndex.message_id"
+                            :data="{ sub_type: 'delete' }" />
+                        <!-- 消息体 -->
+                        <MsgBody v-else-if="(msgIndex.post_type === 'message' ||
+                                     msgIndex.post_type === 'message_sent') &&
+                                     msgIndex.message.length > 0"
+                            :key="msgIndex.fake_message_id ?? msgIndex.message_id"
+                            :selected="multipleSelectList.includes(msgIndex.message_id) || tags.menuDisplay.menuSelectedMsgId == msgIndex.message_id"
+                            :data="msgIndex"
+                            :image-list-header="chatImg"
+                            @click="msgClick($event, msgIndex)"
+                            @show-menu="showMsgMeun"
+                            @scroll-to-msg="scrollToMsg"
+                            @image-loaded="imgLoadedScroll"
+                            @left-move="replyMsg"
+                            @send-poke="sendPoke" />
+                        <!-- 其他通知消息 -->
+                        <NoticeBody v-else-if="msgIndex.post_type === 'notice'"
+                            :id="uuid()"
+                            :key="'notice-' + index"
+                            :data="msgIndex" />
+                    </template>
+                </TransitionGroup>
+            </template>
+            <template v-else>
+                <!-- 搜索消息结果显示 -->
+                <TransitionGroup
+                    :name="runtimeData.sysConfig.opt_fast_animation ? '' : 'msglist'"
+                    tag="div">
+                    <template v-for="(msgIndex, index) in tags.search.list">
+                        <!-- 时间戳 -->
+                        <NoticeBody
+                            v-if="isShowTime(list[Number(index) - 1] ? list[Number(index) - 1].time : undefined, msgIndex.time)"
+                            :key="'notice-time-' + index"
+                            :data="{ sub_type: 'time', time: msgIndex.time }" />
+                        <!-- 消息体 -->
+                        <MsgBody v-if=" (msgIndex.post_type === 'message' ||
+                                     msgIndex.post_type === 'message_sent') &&
+                                     msgIndex.message.length > 0"
+                            :key="msgIndex.fake_message_id ?? msgIndex.message_id"
+                            :selected="multipleSelectList.includes(msgIndex.message_id) || tags.menuDisplay.menuSelectedMsgId == msgIndex.message_id"
+                            :data="msgIndex"
+                            @scroll-to-msg="scrollToMsg"
+                            @show-menu="showMsgMeun"
+                            @image-loaded="imgLoadedScroll"
+                            @left-move="replyMsg" />
+                    </template>
+                </TransitionGroup>
+            </template>
         </div>
         <!-- 滚动到底部悬浮标志 -->
         <div v-show="tags.showBottomButton"
@@ -209,7 +209,8 @@
                                             <EmojiFace v-if="context.type === 'face'"
                                                 :emoji="Emoji.get(Number(context.data.id))" />
                                             <img v-if="context.type === 'image'"
-                                                :src="context.data.url">
+                                                :src="context.data.url"
+                                                @click="viewerEssImg(context.data.url)">
                                         </template>
                                     </div>
                                 </div>
@@ -239,10 +240,42 @@
                         <span>{{ $t('复制') }}</span>
                     </div>
                     <div>
+                        <font-awesome-icon :icon="['fas', 'xmark']" @click="recallMsgs" />
+                        <span>{{ $t('撤回') }}</span>
+                    </div>
+                    <div>
                         <span @click="multipleSelectList = []">{{ multipleSelectList.length }}</span>
                         <span>{{ $t('取消') }}</span>
                     </div>
                 </div>
+                <!-- 图片指示器 -->
+                <Transition name="img-pan">
+                    <div v-show="imgCache.size > 0"
+                        :class="{
+                            'img-pan': true,
+                            'ss-card': true,
+                        }"
+                        @wheel="($event.currentTarget as HTMLElement).scrollLeft += $event.deltaY">
+                        <div class="imgs">
+                            <div v-for="[key, value] in imgCache"
+                                :key="'imgCache-' + key">
+                                <div class="img-btns">
+                                    <div @click="editImg(key)">
+                                        <font-awesome-icon :icon="['fas', 'pencil']" />
+                                    </div>
+                                    <hr>
+                                    <div @click="deleteImg(key)">
+                                        <font-awesome-icon style="color: var(--color-red)" :icon="['fas', 'xmark']" />
+                                    </div>
+                                </div>
+                                <div class="img">
+                                    <img :src="value" :alt="`[SQ:${key}]`">
+                                </div>
+                                <span>#{{ key }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </Transition>
                 <!-- 搜索指示器 -->
                 <div :class="details[3].open ? 'search-tag show' : 'search-tag'">
                     <font-awesome-icon :icon="['fas', 'search']" />
@@ -267,8 +300,9 @@
                     :class="atFindList != null ? 'at-tag show' : 'at-tag'"
                     contenteditable="true"
                     @blur="choiceAt(undefined)">
-                    <div v-for="item in atFindList != null ? atFindList : []"
+                    <div v-for="(item, index) in atFindList != null ? atFindList : []"
                         :key="'atFind-' + item.user_id"
+                        :class="{ selected: index === atSelectedIndex }"
                         @click="choiceAt(item.user_id)">
                         <img :src="'https://q1.qlogo.cn/g?b=qq&s=0&nk=' + item.user_id">
                         <span>{{
@@ -346,18 +380,21 @@
                                     }) : ''"
                             @paste="addImg"
                             @keyup="mainKeyUp"
-                            @click="selectSQIn()"
-                            @input="searchMessage">
-                        <textarea v-else id="main-input"
+                            @click="selectSQIn"
+                            @input="handleInput">
+                        <textarea v-else id="main-input-ex"
                             v-model="msg"
                             type="text"
                             :disabled="runtimeData.tags.openSideBar"
                             @paste="addImg"
                             @keydown="mainKey"
                             @keyup="mainKeyUp"
-                            @click="selectSQIn()"
-                            @input="searchMessage" />
+                            @click="selectSQIn"
+                            @input="handleInput"
+                            @compositionstart="handleCompositionStart"
+                            @compositionend="handleCompositionEnd" />
                     </form>
+                    <slot name="main-input-button" />
                     <div @click="sendMsg('sendMsgBack')">
                         <font-awesome-icon v-if="details[3].open" :icon="['fas', 'search']" />
                         <font-awesome-icon v-else :icon="['fas', 'angle-right']" />
@@ -368,8 +405,6 @@
         </div>
         <!-- 合并转发消息预览器 -->
         <MergePan ref="mergePan" />
-        <!-- At 信息悬浮窗 -->
-        <UserInfoPanComponent :data="userInfoPanData" />
         <!-- 消息右击菜单 -->
         <Teleport to="body">
             <div :class="'msg-menu' + (['linux', 'win32'].includes(backend.platform ?? '') ? ' withBar' : '')">
@@ -410,6 +445,10 @@
                         <div><font-awesome-icon :icon="['fas', 'code']" /></div>
                         <a>{{ $t('复制选中文本') }}</a>
                     </div>
+                    <div v-show="tags.menuDisplay.copyImg" @click="copyImg">
+                        <div><font-awesome-icon :icon="['fas', 'object-ungroup']" /></div>
+                        <a>{{ $t('复制图片') }}</a>
+                    </div>
                     <div v-show="tags.menuDisplay.downloadImg != false" @click="downloadImg">
                         <div><font-awesome-icon :icon="['fas', 'floppy-disk']" /></div>
                         <a>{{ $t('下载图片') }}</a>
@@ -418,8 +457,12 @@
                         <div><font-awesome-icon :icon="['fas', 'xmark']" /></div>
                         <a>{{ $t('撤回') }}</a>
                     </div>
+                    <div v-show="tags.menuDisplay.reedit" @click="reeditMsg">
+                        <div><font-awesome-icon :icon="['fas', 'pencil']" /></div>
+                        <a>{{ $t('重新编辑') }}</a>
+                    </div>
                     <div v-show="tags.menuDisplay.at"
-                        @click="selectedMsg ? addSpecialMsg({ msgObj: { type: 'at', qq: selectedMsg.sender.user_id }, addText: true, }): '';
+                        @click="selectedMsg ? addSpecialMsg({ msgObj: { type: 'at', qq: Number(selectedMsg.sender.user_id) }, addText: true, }): '';
                                 toMainInput();
                                 closeMsgMenu()">
                         <div><font-awesome-icon :icon="['fas', 'at']" /></div>
@@ -455,36 +498,6 @@
         <Transition>
             <Info ref="infoRef" :chat="chat" :tags="tags"
                 @close="openChatInfoPan" />
-        </Transition>
-        <!-- 图片发送器 -->
-        <Transition>
-            <div v-show="imgCache.length > 0" class="img-sender">
-                <div class="card ss-card">
-                    <div class="hander">
-                        <span>{{ $t('发送图片') }}</span>
-                        <button class="ss-button" @click="sendMsg('sendMsgBack')">
-                            {{ $t('发送') }}
-                        </button>
-                    </div>
-                    <div class="imgs">
-                        <div v-for="(img64, index) in imgCache" :key="'sendImg-' + index">
-                            <div @click="deleteImg(index)">
-                                <font-awesome-icon :icon="['fas', 'xmark']" />
-                            </div>
-                            <img :src="img64">
-                        </div>
-                    </div>
-                    <div class="sender">
-                        <font-awesome-icon :icon="['fas', 'image']" @click="runSelectImg" />
-                        <input v-model="msg"
-                            type="text"
-                            :disabled="runtimeData.tags.openSideBar"
-                            @paste="addImg"
-                            @click="toMainInput">
-                    </div>
-                </div>
-                <div class="bg" @click="imgCache = []" />
-            </div>
         </Transition>
         <!-- 转发面板 -->
         <Transition>
@@ -540,7 +553,6 @@ import {
     defineComponent,
     markRaw,
     reactive,
-    shallowReactive
 } from 'vue'
 import { v4 as uuid } from 'uuid'
 import {
@@ -553,6 +565,7 @@ import {
 	VMoveOptions,
 } from '@renderer/function/utils/appUtil'
 import {
+    copyToClipboard,
     getTimeConfig,
     getTrueLang,
     getViewTime,
@@ -563,6 +576,8 @@ import {
     getShowName,
     isShowTime,
     isDeleteMsg,
+    getImageUrlData,
+    getDifferencesWithRanges
 } from '@renderer/function/utils/msgUtil'
 import { Logger, LogType, PopInfo, PopType } from '@renderer/function/base'
 import { Connector } from '@renderer/function/connect'
@@ -576,40 +591,16 @@ import {
     UserGroupElem,
     MenuEventData,
 } from '@renderer/function/elements/information'
-import UserInfoPanComponent, { UserInfoPan } from '@renderer/components/UserInfoPan.vue'
 import { backend } from '@renderer/runtime/backend'
 import Emoji from '@renderer/function/model/emoji'
 import EmojiFace from '@renderer/components/EmojiFace.vue'
 import { Img } from '@renderer/function/model/img'
-
-type IUser = any
-
-const userInfoPanData = shallowReactive<{
-    user: undefined | IUser | number,
-    x: number,
-    y: number,
-}>({
-    user: undefined,
-    x: 0,
-    y: 0,
-})
-const userInfoPanFunc: UserInfoPan = {
-    open: (user: IUser | number, x: number, y: number) => {
-        if(user.level != undefined) {
-            userInfoPanData.user = user
-            userInfoPanData.x = x
-            userInfoPanData.y = y
-        }
-    },
-    close: () => {
-        userInfoPanData.user = undefined
-    },
-}
 </script>
 
 <script lang="ts">
     export default defineComponent({
         name: 'ViewChat',
+        inject: ['viewer'],
         props: ['chat', 'list', 'imgView'],
         data() {
             //#region == 窗口移动相关 ==================================================
@@ -679,6 +670,7 @@ const userInfoPanFunc: UserInfoPan = {
                 trueLang: getTrueLang(),
                 multipleSelectList: [] as string[],
                 tags: {
+                    sendTag: 'REFUSE' as 'READY' | 'PASS' | 'REFUSE',
                     nowGetHistroy: false,
                     showBottomButton: true,
                     showMoreDetail: false,
@@ -697,8 +689,10 @@ const userInfoPanFunc: UserInfoPan = {
                         select: true,
                         copy: true,
                         copySelect: false,
+                        copyImg: false,
                         downloadImg: false as string | false,
                         revoke: false,
+                        reedit: false,
                         at: true,
                         poke: false,
                         remove: false,
@@ -716,6 +710,7 @@ const userInfoPanFunc: UserInfoPan = {
                         msgOnTouchDown: false,
                         onMove: 'no',
                     },
+                    checkNewLineFlag: false,
                 },
                 details: [
                     { open: false },
@@ -726,12 +721,16 @@ const userInfoPanFunc: UserInfoPan = {
                 msgMenus: [],
                 NewMsgNum: 0,
                 msg: '',
-                imgCache: [] as string[],
+                oldMsg: '',
+                imgCache: new Map<number, string>(),
                 sendCache: [] as MsgItemElem[],
                 selectedMsg: null as { [key: string]: any } | null,
                 selectCache: '',
                 replyMsgInfo: null,
                 atFindList: null as GroupMemberInfoElem[] | null,
+                atSelectedIndex: 0,
+                atScrollTimer: null as NodeJS.Timeout | null,
+                atScrollInterval: null as NodeJS.Timeout | null,
                 isShowTime,
                 isDeleteMsg,
                 isDev: import.meta.env.DEV,
@@ -746,10 +745,21 @@ const userInfoPanFunc: UserInfoPan = {
                 this.tags = data.tags
                 this.msgMenus = data.msgMenus
                 this.sendCache = []
-                this.imgCache = [] as string[]
+                this.imgCache.clear()
                 this.multipleSelectList = []
                 this.initMenuDisplay()
+                this.$nextTick(() => {
+                    this.resizeMainInput()
+                })
             },
+            msg(newMsg: string, oldMsg: string) {
+                this.oldMsg = oldMsg
+                if (!newMsg) {
+                    this.$nextTick(() => {
+                        this.resizeMainInput()
+                    })
+                }
+            }
         },
         async mounted() {
             // 消息列表刷新
@@ -774,8 +784,42 @@ const userInfoPanFunc: UserInfoPan = {
                 this.exitWin()
 
             })
+            this.$nextTick(() => {
+                this.resizeMainInput()
+            })
         },
         methods: {
+            resizeMainInput(target?: HTMLTextAreaElement | HTMLInputElement | null) {
+                let input = target ?? (document.getElementById('main-input') as HTMLTextAreaElement | HTMLInputElement | null)
+                input = input ?? (document.getElementById('main-input-ex') as HTMLTextAreaElement | HTMLInputElement | null)
+                if (!input) return
+                if (!this.Option.get('use_breakline')) {
+                    input.style.height = ''
+                    return
+                }
+                const computed = getComputedStyle(input)
+                const lineHeight = parseFloat(computed.lineHeight)
+                const fontSize = parseFloat(computed.fontSize)
+                const baseLineHeight = Number.isFinite(lineHeight) ? lineHeight : fontSize
+                const paddingTop = parseFloat(computed.paddingTop) || 0
+                const paddingBottom = parseFloat(computed.paddingBottom) || 0
+                const borderTop = parseFloat(computed.borderTopWidth) || 0
+                const borderBottom = parseFloat(computed.borderBottomWidth) || 0
+                let minHeight = (Number.isFinite(baseLineHeight) ? baseLineHeight : 0) + paddingTop + paddingBottom + borderTop + borderBottom
+                if (minHeight <= 0) {
+                    const fallback = input.offsetHeight || parseFloat(computed.height) || fontSize
+                    if (fallback && Number.isFinite(fallback)) {
+                        minHeight = fallback
+                    }
+                }
+                if (!input.dataset.baseHeight) {
+                    input.dataset.baseHeight = String(minHeight)
+                }
+                input.style.height = 'auto'
+                const baseHeight = parseFloat(input.dataset.baseHeight) || minHeight
+                const targetHeight = input.scrollHeight > baseHeight * 2 ? Math.max(input.scrollHeight, baseHeight): baseHeight
+                input.style.height = targetHeight + 'px'
+            },
             jumpSearchMsg() {
                 this.closeSearch()
                 setTimeout(() => {
@@ -789,7 +833,9 @@ const userInfoPanFunc: UserInfoPan = {
              * 消息区滚动
              * @param event 滚动事件
              */
-            chatScroll(event: Event) {
+            chatScroll(event: Event, pass: boolean) {
+                if(pass) return
+
                 const body = event.target as HTMLDivElement
                 const bar = document.getElementById('send-more')
                 // 顶部
@@ -909,23 +955,139 @@ const userInfoPanFunc: UserInfoPan = {
              * @param event 事件
              */
             mainKey(event: KeyboardEvent) {
-                if (!event.shiftKey && event.keyCode == 13) {
-                    // enter 发送消息
-                    if (this.msg != '') {
-                        this.sendMsg()
+                // At 选择器激活时的键盘事件处理
+                if (this.tags.onAtFind && this.atFindList && this.atFindList.length > 0) {
+                    // 上下箭头键（支持按住快速滚动）
+                    if (event.keyCode === 38 || event.keyCode === 40) {
+                        event.preventDefault()
+
+                        const direction = event.keyCode === 38 ? -1 : 1
+
+                        // 立即执行一次移动
+                        this.moveAtSelection(direction)
+
+                        // 如果定时器已经存在，说明已经在处理按住状态，直接返回
+                        if (this.atScrollTimer !== null) return
+
+                        // 延迟后开始快速滚动
+                        this.atScrollTimer = setTimeout(() => {
+                            this.atScrollInterval = setInterval(() => {
+                                this.moveAtSelection(direction)
+                            }, 50) // 每50ms移动一次
+                        }, 300) // 300ms后开始快速滚动
+
+                        return
+                    }
+
+                    // 回车键选择
+                    if (event.keyCode === 13) {
+                        event.preventDefault()
+                        const selectedMember = this.atFindList[this.atSelectedIndex]
+                        if (selectedMember) {
+                            this.choiceAt(selectedMember.user_id)
+                        }
+                        return
+                    }
+
+                    // ESC 键取消
+                    if (event.keyCode === 27) {
+                        event.preventDefault()
+                        // 删除输入框中从最后一个 @ 开始的所有内容
+                        const lastAtIndex = this.msg.lastIndexOf('@')
+                        if (lastAtIndex >= 0) {
+                            this.msg = this.msg.substring(0, lastAtIndex)
+                        }
+                        this.tags.onAtFind = false
+                        this.atFindList = null
+                        this.atSelectedIndex = 0
+                        return
                     }
                 }
+
+                if(this.tags.onAtFind) return
+                if (event.key !== 'Enter') return
+                let canSend = false
+                switch (runtimeData.sysConfig.send_key) {
+                    case 'none':
+                        if (event.shiftKey) break
+                        if (event.ctrlKey) break
+                        if (event.altKey) break
+                        if (event.metaKey) break
+                        canSend = true
+                        break
+                    case 'shift':
+                        if (!event.shiftKey) break
+                        canSend = true
+                        break
+                    case 'ctrl':
+                        if (!event.ctrlKey) break
+                        canSend = true
+                        break
+                    case 'alt':
+                        if (!event.altKey) break
+                        canSend = true
+                        break
+                    case 'meta':
+                        if (!event.metaKey) break
+                        canSend = true
+                        break
+                }
+
+                if(canSend && this.tags.sendTag != 'PASS') {
+                    this.tags.sendTag = 'READY'
+                }
+
+                if (this.tags.sendTag == 'READY' && this.msg !== '') {
+                    this.sendMsg()
+                } else {
+                    if(event.key === 'Enter' &&
+                        (event.ctrlKey || event.metaKey || event.altKey)) {
+                        // 否则触发回车逻辑，补充换行
+                        this.msg += '\n'
+                    }
+                }
+
+                this.tags.sendTag = 'REFUSE'
             },
+
+            handleCompositionStart() {
+                this.tags.sendTag = 'REFUSE'
+            },
+            handleCompositionEnd() {
+                this.tags.sendTag = 'PASS'
+                setTimeout(() => { this.tags.sendTag = 'REFUSE' }, 50)
+            },
+
             mainKeyUp(event: KeyboardEvent) {
                 const logger = new Logger()
-                // 发送完成后输入框会遗留一个换行，把它删掉 ……
-                if (
-                    !event.shiftKey &&
-                    event.keyCode == 13 &&
-                    this.msg == '\n'
-                ) {
-                    this.msg = ''
+
+                // 清除箭头键快速滚动定时器
+                if (event.keyCode === 38 || event.keyCode === 40) {
+                    if (this.atScrollTimer !== null) {
+                        clearTimeout(this.atScrollTimer)
+                        this.atScrollTimer = null
+                    }
+                    if (this.atScrollInterval !== null) {
+                        clearInterval(this.atScrollInterval)
+                        this.atScrollInterval = null
+                    }
                 }
+
+                // 发送完成后输入框会遗留一个换行，把它删掉 ……
+                if (this.tags.checkNewLineFlag){
+                    this.tags.checkNewLineFlag = false
+                    if (this.msg == '\n'){
+                        this.msg = ''
+                    }
+                }
+
+                // At 选择器激活时的回车键处理在 keydown 中完成，这里不需要额外处理
+                if (this.tags.onAtFind && this.atFindList && this.atFindList.length > 0) {
+                    if (event.keyCode === 38 || event.keyCode === 40 || event.keyCode === 13 || event.keyCode === 27) {
+                        return
+                    }
+                }
+
                 if (event.keyCode != 13) {
                     // 获取最后一个输入的符号用于判定 at
                     const lastInput = this.msg.substring(this.msg.length - 1)
@@ -937,26 +1099,31 @@ const userInfoPanFunc: UserInfoPan = {
                     ) {
                         logger.add(LogType.UI, '开始匹配群成员列表 ……')
                         this.tags.onAtFind = true
+                        this.atSelectedIndex = 0
                     }
                     if (this.tags.onAtFind) {
                         if (this.msg.lastIndexOf('@') < 0) {
                             logger.add(LogType.UI, '匹配群成员列表被打断 ……')
                             this.tags.onAtFind = false
                             this.atFindList = null
+                            this.atSelectedIndex = 0
                         } else {
                             const atInfo = this.msg
                                 .substring(this.msg.lastIndexOf('@') + 1)
                                 .toLowerCase()
-                            if (atInfo != '') {
+                            this.atFindList = runtimeData.chatInfo.info.group_members
+                                    .filter((item) => { return (
+                                            (item.card != '' && item.card != null && item.card.toLowerCase().indexOf(atInfo) >=0) ||
+                                            item.nickname.toLowerCase().indexOf(atInfo) >= 0 ||
+                                            atInfo ==item.user_id.toString()
+                                        )
+                                    },
+                                )
+                            // 如果啥都没匹配到，就显示所有
+                            if (this.atFindList.length == 0) {
                                 this.atFindList = runtimeData.chatInfo.info.group_members
-                                        .filter((item) => { return (
-                                                (item.card != '' && item.card != null && item.card.toLowerCase().indexOf(atInfo) >=0) ||
-                                                item.nickname.toLowerCase().indexOf(atInfo) >= 0 ||
-                                                atInfo ==item.user_id.toString()
-                                            )
-                                        },
-                                    )
                             }
+                            this.atSelectedIndex = 0
                         }
                     }
                 }
@@ -971,6 +1138,8 @@ const userInfoPanFunc: UserInfoPan = {
                 if (this.msg != '') {
                     this.sendMsg()
                 }
+                // 多行模式下不通过这个处理
+                // textarea 不会触发 submit 事件
             },
 
             /**
@@ -983,22 +1152,61 @@ const userInfoPanFunc: UserInfoPan = {
                     this.msg = this.msg.substring(0, this.msg.lastIndexOf('@'))
                     // 添加 at 信息
                     this.addSpecialMsg({
-                        msgObj: { type: 'at', qq: id },
+                        msgObj: { type: 'at', qq: Number(id) },
                         addText: true,
                     })
                 }
                 this.toMainInput()
                 this.tags.onAtFind = false
                 this.atFindList = null
+                this.atSelectedIndex = 0
+            },
+
+            /**
+             * 滚动 At 列表到选中项
+             */
+            scrollAtListToSelected() {
+                this.$nextTick(() => {
+                    const container = document.querySelector('.at-tag.show')
+                    const selectedItem = document.querySelector('.at-tag.show > div.selected')
+                    if (container && selectedItem) {
+                        const containerRect = container.getBoundingClientRect()
+                        const itemRect = selectedItem.getBoundingClientRect()
+
+                        // 如果选中项在容器可视范围之外，则滚动到该项
+                        if (itemRect.top < containerRect.top) {
+                            selectedItem.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+                        } else if (itemRect.bottom > containerRect.bottom) {
+                            selectedItem.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+                        }
+                    }
+                })
+            },
+
+            /**
+             * 移动 At 列表选中项
+             * @param direction 方向，-1 为向上，1 为向下
+             */
+            moveAtSelection(direction: number) {
+                if (!this.atFindList || this.atFindList.length === 0) return
+
+                if (direction === -1) {
+                    // 向上移动
+                    this.atSelectedIndex = this.atSelectedIndex > 0? this.atSelectedIndex - 1: this.atFindList.length - 1
+                } else {
+                    // 向下移动
+                    this.atSelectedIndex = this.atSelectedIndex < this.atFindList.length - 1? this.atSelectedIndex + 1: 0
+                }
+
+                this.scrollAtListToSelected()
             },
 
             /**
              * 选中光标在其内部的那个 SQLCode
              */
             selectSQIn() {
-                const input = document.getElementById(
-                    'main-input',
-                ) as HTMLInputElement
+                const input = (document.getElementById( 'main-input') as HTMLTextAreaElement | HTMLInputElement | null) ??
+                    (document.getElementById( 'main-input-ex') as HTMLTextAreaElement | HTMLInputElement | null)
                 // 如果文本框里本来就选中着什么东西就不触发了
                 if (
                     input !== null &&
@@ -1112,6 +1320,8 @@ const userInfoPanFunc: UserInfoPan = {
                             // 自己的消息、管理员和群主会显示撤回
                             this.tags.menuDisplay.revoke = true
                         }
+                        // 重新编辑判定
+                        this.tags.menuDisplay.reedit = this.tags.menuDisplay.revoke && data.sender.user_id === runtimeData.loginInfo.uin
                         if (data.revoke === true) {
                             // 已被撤回的自己的消息只显示复制
                             this.tags.menuDisplay.relpy = false
@@ -1170,11 +1380,13 @@ const userInfoPanFunc: UserInfoPan = {
                                 this.tags.menuDisplay.add = false
                             }
                         })
-                        if (select.nodeName == 'IMG') {
+                        if (select.nodeName == 'IMG' && (select as HTMLImageElement).src.length > 0) {
                             // 右击图片需要显示的内容，这边特例设置为链接
                             this.tags.menuDisplay.downloadImg = (
                                 select as HTMLImageElement
                             ).src
+                            if (backend.isDesktop())
+                                this.tags.menuDisplay.copyImg = true
                         }
                     }
                     // 鼠标位置
@@ -1224,7 +1436,9 @@ const userInfoPanFunc: UserInfoPan = {
                     copy: true,
                     copySelect: false,
                     downloadImg: false,
+                    copyImg: false,
                     revoke: false,
+                    reedit: false,
                     at: false,
                     poke: false,
                     remove: false,
@@ -1278,6 +1492,7 @@ const userInfoPanFunc: UserInfoPan = {
                 if (!this.selectedMsg) return
                 // eslint-disable-next-line no-console
                 console.log(this.selectedMsg)
+                this.closeMsgMenu()
             },
 
             /**
@@ -1320,6 +1535,7 @@ const userInfoPanFunc: UserInfoPan = {
                         this.forwardList.unshift(item)
                     }
                 })
+                this.closeMsgMenu()
             },
 
             forwardSelf() {
@@ -1542,12 +1758,49 @@ const userInfoPanFunc: UserInfoPan = {
             },
 
             /**
+             * 复制图片
+             */
+            async copyImg() {
+                const url = this.tags.menuDisplay.downloadImg
+                if (!url) return
+
+                // 关闭菜单
+                this.closeMsgMenu()
+
+                // 获取图片数据
+                const { blob, buffer } = await getImageUrlData(url)
+
+                const popInfo = new PopInfo()
+                if(backend.type === 'tauri') {
+                    try {
+                        const Clipboard = await import('@tauri-apps/plugin-clipboard-manager')
+
+                        await Clipboard.writeImage(buffer)
+                        popInfo.add(PopType.INFO, this.$t('复制成功'))
+                    } catch(e) {
+                        popInfo.add(PopType.ERR, this.$t('复制失败'))
+                        new Logger().error(e as unknown as Error, '复制图片失败')
+                    }
+                } else {
+                    const item = new ClipboardItem({ [blob.type]: blob })
+                    try {
+                        await copyToClipboard([item])
+                        popInfo.add(PopType.INFO, this.$t('复制成功'))
+                    } catch (e) {
+                        popInfo.add(PopType.ERR, this.$t('复制失败'))
+                        new Logger().error(e as unknown as Error, '复制图片失败')
+                    }
+                }
+            },
+
+            /**
              * 下载选中的图片
              */
             downloadImg() {
                 const url = this.tags.menuDisplay.downloadImg
                 if (url != false) {
-                    downloadFile(url as string, 'img.png', () => undefined, () => undefined)
+
+                    downloadFile(url as string, `img_${new Date().getTime()}.png`, () => undefined, () => undefined)
                 }
                 this.closeMsgMenu()
             },
@@ -1555,14 +1808,39 @@ const userInfoPanFunc: UserInfoPan = {
             /**
              * 撤回消息
              */
-            revokeMsg() {
+            async revokeMsg() {
                 const msg = this.selectedMsg
-                if (msg !== null) {
-                    const msgId = msg.message_id
-                    Connector.send('delete_msg', { message_id: msgId }, 'deleteMsg')
-                    // 关闭消息菜单
-                    this.closeMsgMenu()
+
+                // 关闭消息菜单
+                this.closeMsgMenu()
+
+                if (!msg) {
+                    new PopInfo().add(PopType.ERR, this.$t('获取选中消息失败'))
+                    return
                 }
+
+                const msgId = msg.message_id
+                await Connector.callApi('delete_msg', { message_id: msgId })
+            },
+
+            /**
+             * 重新编辑消息
+             */
+            async reeditMsg() {
+                const msg = this.selectedMsg
+
+                // 关闭消息菜单
+                this.closeMsgMenu()
+
+                if (!msg) {
+                    new PopInfo().add(PopType.ERR, this.$t('获取选中消息失败'))
+                    return
+                }
+
+                const msgId = msg.message_id
+                await Connector.callApi('delete_msg', { message_id: msgId })
+
+                this.reedit(msg)
             },
 
             /**
@@ -1693,7 +1971,24 @@ const userInfoPanFunc: UserInfoPan = {
              * @param { number } index 图片编号
              */
             deleteImg(index: number) {
-                this.imgCache.splice(index, 1)
+                this.imgCache.delete(index)
+                this.msg = this.msg.replace(
+                    '[SQ:' + index + ']',
+                    '',
+                )
+                // 解决 ] 被删掉的情况
+                this.msg = this.msg.replace(
+                    '[SQ:' + index,
+                    '',
+                )
+            },
+
+            async editImg(key: number) {
+                const img = this.imgCache.get(key)
+                if (!img) return
+                if (!this.viewer) return
+                const dataurl = await (this.viewer as any).edit(img)
+                this.imgCache.set(key, dataurl)
             },
 
             /**
@@ -1701,6 +1996,8 @@ const userInfoPanFunc: UserInfoPan = {
              * @param data obj
              */
             addSpecialMsg(data: SQCodeElem) {
+                const input = (document.getElementById( 'main-input') as HTMLTextAreaElement | HTMLInputElement) ??
+                    (document.getElementById( 'main-input-ex') as HTMLTextAreaElement | HTMLInputElement)
                 if (data !== undefined) {
                     const index = this.sendCache.length
                     this.sendCache.push(data.msgObj)
@@ -1708,7 +2005,15 @@ const userInfoPanFunc: UserInfoPan = {
                         if (data.addTop === true) {
                             this.msg = '[SQ:' + index + ']' + this.msg
                         } else {
-                            this.msg += '[SQ:' + index + ']'
+                            const selectStart = input.selectionStart
+                            if(selectStart != null) {
+                                // 插到光标位置
+                                const first = this.msg.substring(0, selectStart)
+                                const last = this.msg.substring(selectStart, this.msg.length)
+                                this.msg = first + '[SQ:' + index + ']' + last
+                            } else {
+                                this.msg += '[SQ:' + index + ']'
+                            }
                         }
                     }
                     return index
@@ -1815,7 +2120,7 @@ const userInfoPanFunc: UserInfoPan = {
                         )
                         // 发送文件不能包含任何其他内容
                         this.sendCache = []
-                        this.imgCache = []
+                        this.imgCache.clear()
                         this.msg = ''
                         this.addSpecialMsg({
                             addText: true,
@@ -1841,70 +2146,75 @@ const userInfoPanFunc: UserInfoPan = {
              * 将图片转换为 base64 并缓存
              * @param blob 文件对象
              */
-            async setImg(blob: File | null) {
+            async setImg(file: File | null) {
                 const popInfo = new PopInfo()
-                if (
-                    blob !== null &&
-                    blob.type.indexOf('image/') >= 0 &&
-                    blob.size !== 0
-                ) {
-                    if (blob.size < 3145728) {
-                        // 转换为 Base64
-                        const reader = new FileReader()
-                        reader.readAsDataURL(blob)
-                        reader.onloadend = () => {
-                            const base64data = reader.result as string
-                            if (base64data !== null) {
-                                if (Option.get('close_chat_pic_pan') === true) {
-                                    // 在关闭图片插入面板的模式下将直接以 SQCode 插入输入框
-                                    const data = {
-                                        addText: true,
-                                        msgObj: {
-                                            type: 'image',
-                                            file:
-                                                'base64://' +
-                                                base64data.substring(
-                                                    base64data.indexOf(
-                                                        'base64,',
-                                                    ) + 7,
-                                                    base64data.length,
-                                                ),
-                                        },
-                                    }
-                                    this.addSpecialMsg(data)
-                                } else {
-                                    // 记录图片信息
-                                    // 只要你内存够猛，随便 cache 图片，这边就不做限制了
-                                    this.imgCache.push(base64data)
-                                }
-                            }
-                        }
-                    } else {
-                        // 压缩图片
-                        const options = { maxSizeMB: 3, useWebWorker: true }
-                        try {
-                            popInfo.add(
-                                PopType.INFO,
-                                this.$t('正在压缩图片 ……'),
-                            )
-                            const compressedFile = await imageCompression(
-                                blob,
-                                options,
-                            )
-                            new Logger().add(
-                                LogType.INFO,
-                                '图片压缩成功，原大小：' +
-                                    blob.size / 1024 / 1024 +
-                                    ' MB，压缩后大小：' +
-                                    compressedFile.size / 1024 / 1024 +
-                                    ' MB',
-                            )
-                            this.setImg(compressedFile)
-                        } catch (error) {
-                            popInfo.add(PopType.INFO, this.$t('压缩图片失败'))
-                        }
+                if (!file) return
+                if (!file.type.includes('image/')) return
+                if (file.size === 0) return
+
+                // 图片太大
+                if (file.size > 3145728) {
+                    const options = { maxSizeMB: 3, useWebWorker: true }
+                    try {
+                        popInfo.add(
+                            PopType.INFO,
+                            this.$t('正在压缩图片 ……'),
+                        )
+                        const compressedFile = await imageCompression(
+                            file,
+                            options,
+                        )
+                        new Logger().add(
+                            LogType.INFO,
+                            '图片压缩成功，原大小：' +
+                                file.size / 1024 / 1024 +
+                                ' MB，压缩后大小：' +
+                                compressedFile.size / 1024 / 1024 +
+                                ' MB',
+                        )
+                        this.setImg(compressedFile)
+                    } catch (error) {
+                        new Logger().error(error as Error, '图片压缩失败')
+                        popInfo.add(PopType.INFO, this.$t('压缩图片失败'))
                     }
+                    return
                 }
+
+                // sq 占位符
+                const id = this.sendCache.length
+                const data = {
+                    type: 'text',
+                    text: `[${this.$t('图片')}]`,
+                }
+                this.addSpecialMsg({
+                    addText: true,
+                    msgObj: data,
+                })
+
+                this.imgCache.set(id, await this.fileToDataURL(file))
+            },
+
+
+            /**
+             * 将文件转换为 data URL
+             * @param file 文件对象
+             * @returns data URL
+             */
+            async fileToDataURL(file: File): Promise<string> {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader()
+
+                    reader.onload = function(event) {
+                        if (!event.target) reject(new Error('读取文件失败'))
+                        else resolve(event.target.result as string) // 这就是 data URL
+                    }
+
+                    reader.onerror = function(error) {
+                        reject(error)
+                    }
+
+                    reader.readAsDataURL(file)
+                })
             },
 
             /**
@@ -1930,6 +2240,17 @@ const userInfoPanFunc: UserInfoPan = {
                 this.details.forEach((item) => {
                     item.open = false
                 })
+
+                // 解析图片
+                for (const [key, base64data] of this.imgCache) {
+                    this.sendCache[key] = {
+                        type: 'image',
+                        file: 'base64://' + base64data.substring(
+                            base64data.indexOf('base64,') + 7,
+                            base64data.length
+                        )
+                    }
+                }
                 // 为了减少对于复杂图文排版页面显示上的工作量，对于非纯文本的消息依旧处理为纯文本，如：
                 // "这是一段话 [SQ:0]，[SQ:1] 你要不要来试试 Stapxs QQ Lite？"
                 // 其中 [SQ:n] 结构代表着这是特殊消息以及这个消息具体内容在消息缓存中的 index，像是这样：
@@ -1939,7 +2260,7 @@ const userInfoPanFunc: UserInfoPan = {
                 const msg = SendUtil.parseMsg(
                     this.msg,
                     this.sendCache,
-                    this.imgCache,
+                    [],
                 )
                 if (this.chat.show.temp) {
                     sendMsgRaw(
@@ -1959,11 +2280,15 @@ const userInfoPanFunc: UserInfoPan = {
                     )
                 }
                 // 发送后事务
+                this.tags.checkNewLineFlag = true
                 this.msg = ''
                 this.sendCache = []
-                this.imgCache = []
+                this.imgCache.clear()
                 this.scrollBottom()
                 this.cancelReply()
+                this.$nextTick(() => {
+                    this.resizeMainInput()
+                })
             },
 
             updateList(newLength: number, oldLength: number) {
@@ -2168,6 +2493,22 @@ const userInfoPanFunc: UserInfoPan = {
             },
 
             /**
+             * 批量撤回消息
+             */
+            async recallMsgs() {
+                const msgList = this.list.filter((item: any) => this.multipleSelectList.includes(item.message_id))
+
+                const tasks: Promise<true | undefined>[] = []
+                for (const msg of msgList) {
+                    const msgId = msg.message_id
+                    tasks.push(Connector.callApi('delete_msg', { message_id: msgId }))
+                }
+                // 关闭多选菜单
+                this.multipleSelectList = []
+                await Promise.all(tasks)
+            },
+
+            /**
              * 获取显示群精华消息
              */
             showJin() {
@@ -2189,9 +2530,33 @@ const userInfoPanFunc: UserInfoPan = {
                 this.tags.showMoreDetail = !this.tags.showMoreDetail
             },
 
-            searchMessage(event: Event) {
+            handleInput(event: Event) {
+                const input = event.target as HTMLInputElement
+                this.resizeMainInput(input)
+
+                // 如果删掉了一个 ]
+                const diff = getDifferencesWithRanges(this.msg, this.oldMsg)
+                let { end, str } = { end: 0, str: '' }
+                if(diff.length > 0) {
+                    ({ end, str } = diff[0])
+                }
+
+                if(str.indexOf(']') >= 0) {
+                    const sqIndex = this.oldMsg.substring(0, end).lastIndexOf('[SQ:')
+                    if(sqIndex >= 0 && sqIndex < end) {
+                        // 取出整个 SQ
+                        const msgHas = this.oldMsg.substring(sqIndex)
+                        const sq = this.oldMsg.slice(sqIndex, msgHas.indexOf(']') + sqIndex + 1)
+                        const numStr = sq.replace('[SQ:', '').replace(']', '')
+                        const num = Number(numStr)
+                        if(!isNaN(num) && this.imgCache.has(num)) {
+                            this.deleteImg(num)
+                        }
+                    }
+                }
+
                 if (this.details[3].open) {
-                    const value = (event.target as HTMLInputElement).value
+                    const value = input.value
                     if (value.length == 0) {
                         this.tags.search.list = reactive(this.list)
                     } else if (value.length > 0) {
@@ -2212,6 +2577,9 @@ const userInfoPanFunc: UserInfoPan = {
                 this.details[3].open = !this.details[3].open
                 this.msg = ''
                 this.tags.search.list = reactive(this.list)
+                this.$nextTick(() => {
+                    this.resizeMainInput()
+                })
             },
 
             /**
@@ -2240,6 +2608,31 @@ const userInfoPanFunc: UserInfoPan = {
             },
 
             /**
+             * 重新编辑消息
+             */
+            reedit(msg: any) {
+                this.msg = ''
+                this.sendCache = []
+                this.imgCache.clear()
+                this.cancelReply()
+                for (const seg of msg.message) {
+                    if (seg.type === 'text') {
+                        this.msg += seg.text
+                    } else if (seg.type === 'reply') {
+                        const msg = this.list.find((item: any) => item.message_id == seg.id)
+                        if (!msg) continue
+                        this.replyMsg(msg)
+                    } else {
+                        this.addSpecialMsg({
+                            addText: false,
+                            msgObj: seg,
+                        })
+                        this.msg += '[SQ:' + (this.sendCache.length - 1) + ']'
+                    }
+                }
+            },
+
+            /**
              * 精华消息滚动事件
              */
             jinScroll(event: Event) {
@@ -2264,6 +2657,14 @@ const userInfoPanFunc: UserInfoPan = {
                         )
                     }
                 }
+            },
+
+            /**
+             * 预览精华消息图片
+             */
+            viewerEssImg(url: string) {
+                if (!this.viewer) return
+                (this.viewer as any).open(new Img(url))
             },
 
             /**
